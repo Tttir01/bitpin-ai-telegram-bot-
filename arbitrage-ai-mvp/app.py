@@ -8,10 +8,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.title("📈 Arbitrage AI")
-st.caption("نسخه آزمایشی ۰.۲ | رمزارز | فقط تحلیل و شبیه‌سازی")
+st.caption("نسخه آزمایشی ۰.۳ | بیت‌پین ↔ MEXC | فقط تحلیل و شبیه‌سازی")
 st.warning(
     "این نسخه سفارش واقعی ثبت نمی‌کند. سود خالص فقط یک برآورد است؛ "
-    "عمق سفارش، موجودی دو صرافی، امکان انتقال و تغییر قیمت هنگام اجرا هنوز تأیید نمی‌شوند."
+    "عمق کامل سفارش، موجودی حساب‌ها، امکان انتقال و تغییر قیمت هنگام اجرا "
+    "هنوز تأیید نمی‌شوند."
 )
 
 with st.sidebar:
@@ -25,7 +26,7 @@ with st.sidebar:
         max_value=5.0, value=0.25, step=0.05
     ) / 100
     fee_global = st.number_input(
-        "کارمزد هر سمت بایننس (%)", min_value=0.0,
+        "کارمزد هر سمت MEXC (%)", min_value=0.0,
         max_value=5.0, value=0.10, step=0.05
     ) / 100
     slippage_pct = st.number_input(
@@ -46,11 +47,9 @@ with st.sidebar:
     )
     refresh = st.button("🔄 دریافت قیمت‌ها", use_container_width=True)
 
-scan_settings = (
-    fee_local, fee_global, slippage_pct, transfer_cost_pct
-)
+scan_settings = (fee_local, fee_global, slippage_pct, transfer_cost_pct)
 if refresh or st.session_state.get("scan_settings") != scan_settings:
-    with st.spinner("در حال دریافت داده‌های عمومی..."):
+    with st.spinner("در حال دریافت داده‌های عمومی بیت‌پین و MEXC..."):
         st.session_state["scan"] = scan_markets(
             fee_local=fee_local,
             fee_global=fee_global,
@@ -79,7 +78,7 @@ if not df.empty:
 if df.empty:
     st.info(
         "با هزینه‌ها و حداقل سود انتخاب‌شده، فرصت مثبت و قابل بررسی پیدا نشد؛ "
-        "یا API در دسترس نیست."
+        "یا API در دسترس نیست یا جفت‌ارز مشترک وجود ندارد."
     )
 else:
     st.subheader("فرصت‌های قابل بررسی")
@@ -109,12 +108,13 @@ st.write(
 )
 st.subheader("مواردی که هنوز بررسی نمی‌شوند")
 st.write(
-    "- عمق دفتر سفارش و حجم قابل معامله در قیمت‌های واقعی\n"
+    "- عمق کامل دفتر سفارش و حجم قابل معامله در چند سطح قیمت\n"
     "- موجودی قابل برداشت و امکان انتقال بین صرافی‌ها\n"
     "- زمان انتقال، محدودیت شبکه و تغییر قیمت در مسیر\n"
-    "- تطبیق دقیق واحد ارز مظنه بین دو بازار"
+    "- تطبیق دقیق واحد ارز مظنه بین دو بازار\n"
+    "- ثبت، پیگیری یا لغو سفارش واقعی"
 )
 st.info(
-    "نسخه ۰.۲ فقط داده عمومی می‌خواند. هیچ کلید خصوصی، "
-    "اطلاعات ورود حساب، برداشت یا سفارش واقعی استفاده نمی‌شود."
+    "نسخه ۰.۳ فقط داده عمومی بیت‌پین و MEXC را می‌خواند. "
+    "هیچ کلید خصوصی، اطلاعات ورود حساب، برداشت یا سفارش واقعی استفاده نمی‌شود."
 )
