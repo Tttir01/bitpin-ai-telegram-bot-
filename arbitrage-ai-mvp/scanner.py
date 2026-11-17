@@ -258,6 +258,16 @@ def scan_markets(
                 net_profit = net_sell_value - buy_debit - transfer_cost
                 used_capital = buy_debit + transfer_cost
                 net_pct = (net_profit / used_capital * 100) if used_capital else -100
+
+                # Exact cost breakdown using the same fee/slippage sequence as the simulation.
+                buy_fee_cost = raw_buy_cost * buy_fee
+                buy_slippage_cost = raw_buy_cost * (1 + buy_fee) * slippage
+                sell_fee_cost = raw_sell_value * sell_fee
+                sell_slippage_cost = raw_sell_value * (1 - sell_fee) * slippage
+                total_costs = (
+                    buy_fee_cost + buy_slippage_cost
+                    + sell_fee_cost + sell_slippage_cost + transfer_cost
+                )
                 if raw_buy_cost <= 0:
                     continue
 
@@ -308,6 +318,13 @@ def scan_markets(
                     "validation_status": validation_status,
                     "buy_gross_toman": round(raw_buy_cost),
                     "sell_gross_toman": round(raw_sell_value),
+                    "buy_fee_toman": round(buy_fee_cost),
+                    "buy_slippage_toman": round(buy_slippage_cost),
+                    "sell_fee_toman": round(sell_fee_cost),
+                    "sell_slippage_toman": round(sell_slippage_cost),
+                    "transfer_cost_toman": round(transfer_cost),
+                    "total_costs_toman": round(total_costs),
+                    "gross_profit_toman": round(raw_sell_value - raw_buy_cost),
                     "depth_note": age_label,
                     "note": "محاسبه بر اساس سطوح قابل مشاهده دفتر سفارش؛ موجودی و انتقال تأیید نشده",
                 })
