@@ -1,15 +1,38 @@
+import time
 import requests
 
-BITPIN = "https://api.bitpin.org/api/v1"
-BINANCE = "https://data-api.binance.vision/api/v3"
+# Bitpin provides the same public REST API on these domains.
+BITPIN_BASES = (
+    "https://api.bitpin.org/api/v1",
+    "https://api.bitpin.ir/api/v1",
+    "https://api.bitpin.market/api/v1",
+)
+MEXC = "https://api.mexc.com/api/v3"
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; ArbitrageAI/0.3; +https://github.com/)",
+    "Accept": "application/json",
+}
 
 
-def get_json(url):
-    response = requests.get(
-        url, timeout=15, headers={"User-Agent": "ArbitrageAI-MVP/0.2"}
-    )
-    response.raise_for_status()
-    return response.json()
+def get_json(url, retries=2):
+    last_error = None
+    for attempt in range(retries + 1):
+        try:
+            response = requests.get(url, timeout=(5, 15), headers=HEADERS)
+            # Retry transient rate-limit/server responses only.
+            if response.status_code in (429, 500, 502, 503, 504) and attempt < retries:
+                time.sleep(1.0 * (attempt + 1))
+                continue
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as error:
+            last_error = error
+            status = getattr(getattr(error, "response", None), "status_code", None)
+            if status not in (None, 429, 500, 502, 503, 504) or attempt >= retries:
+                raise
+            time.sleep(1.0 * (attempt + 1))
+    raise last_error
 
 
 def rows(payload):
@@ -17,58 +40,100 @@ def rows(payload):
         return payload
     if isinstance(payload, dict):
         for key in ("results", "data", "items", "tickers", "markets"):
-            if isinstance(payload.get(key), list):
-                return payload[key]
+            value = payload.get(key)
+            if isinstance(value, list):
+                return value
+            if isinstance(value, dict):
+                return rows(value)
     return []
 
 
 def val(data, *keys):
     for key in keys:
         try:
-            if data.get(key) not in (None, ""):
-                number = float(data[key])
+            value = data.get(key)
+            if value not in (None, ""):
+                number = float(value)
                 if number > 0:
                     return number
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, AttributeError):
             pass
     return None
 
 
+def normalize_symbol(raw, quotes):
+    symbol = str(raw or "").upper().replace("_", "/").replace("-", "/")
+    if "/" not in symbol:
+        for quote in sorted(quotes, key=len, reverse=True):
+            if symbol.endswith(quote) and len(symbol) > len(quote):
+                return symbol[:-len(quote)] + "/" + quote
+    return symbol
+
+
 def bitpin_data():
+    last_error = None
+    payload = None
+    successful_base = None
+    for base in BITPIN_BASES:
+        try:
+            payload = get_json(f"{base}/mkt/tickers/")
+            successful_base = base
+            break
+        except requests.RequestException as error:
+            last_error = error
+            # Try the documented alternate Bitpin domains for access/routing errors.
+            continue
+
+    if payload is None:
+        status = getattr(getattr(last_error, "response", None), "status_code", "network")
+        raise RuntimeError(
+            f"همه دامنه‌های عمومی بیت‌پین ناموفق بودند (آخرین وضعیت: {status}). "
+            "اگر 403 باقی است، محدودیت IP/دسترسی سمت بیت‌پین یا میزبان را بررسی کنید."
+        ) from last_error
+
     markets = {}
-    for item in rows(get_json(f"{BITPIN}/mkt/tickers/")):
+    for item in rows(payload):
         if not isinstance(item, dict):
             continue
-        symbol = str(
-            item.get("symbol") or item.get("market") or item.get("code") or ""
-        ).upper().replace("_", "/").replace("-", "/")
-        if "/" not in symbol:
-            for quote in ("USDT", "USDC", "BTC", "ETH", "IRT", "IRR"):
-                if symbol.endswith(quote) and len(symbol) > len(quote):
-                    symbol = symbol[:-len(quote)] + "/" + quote
-                    break
+        symbol = normalize_symbol(
+            item.get("symbol") or item.get("market") or item.get("code"),
+            ("USDT", "USDC", "BTC", "ETH", "IRT", "IRR"),
+        )
         last = val(item, "last", "price", "close", "last_price")
-        bid = val(item, "bid", "best_bid")
-        ask = val(item, "ask", "best_ask")
+        bid = val(item, "bid", "best_bid", "bid_price")
+        ask = val(item, "ask", "best_ask", "ask_price")
         if symbol and last:
             markets[symbol] = {"bid": bid or last, "ask": ask or last}
+    if not markets:
+        raise RuntimeError(
+            f"پاسخ {successful_base} دریافت شد، اما ساختار نمادها قابل شناسایی نبود."
+        )
     return markets
 
 
-def binance_data():
+def mexc_data():
+    payload = get_json(f"{MEXC}/ticker/bookTicker")
     markets = {}
-    payload = get_json(f"{BINANCE}/ticker/bookTicker")
-    for item in payload:
-        symbol = str(item.get("symbol", "")).upper()
-        for quote in ("USDT", "USDC", "BTC", "ETH", "FDUSD", "EUR"):
-            if symbol.endswith(quote) and len(symbol) > len(quote):
-                bid = val(item, "bidPrice")
-                ask = val(item, "askPrice")
-                if bid and ask:
-                    markets[symbol[:-len(quote)] + "/" + quote] = {
-                        "bid": bid, "ask": ask
-                    }
-                break
+    for item in rows(payload):
+        if not isinstance(item, dict):
+            continue
+        symbol = normalize_symbol(
+            item.get("symbol"),
+            ("USDT", "USDC", "BTC", "ETH", "EUR"),
+        )
+        bid = val(item, "bidPrice", "bid")
+        ask = val(item, "askPrice", "ask")
+        bid_qty = val(item, "bidQty", "bidSize")
+        ask_qty = val(item, "askQty", "askSize")
+        if symbol and bid and ask:
+            markets[symbol] = {
+                "bid": bid,
+                "ask": ask,
+                "bid_qty": bid_qty,
+                "ask_qty": ask_qty,
+            }
+    if not markets:
+        raise RuntimeError("MEXC پاسخی داد، اما داده معتبر دفتر سفارش دریافت نشد.")
     return markets
 
 
@@ -79,9 +144,8 @@ def scan_markets(
     transfer_cost_pct=0.30,
 ):
     """
-    slippage_pct: estimated slippage on EACH side, in percent.
-    transfer_cost_pct: estimated total transfer/other cost as percent of buy notional.
-    The estimates are user inputs, not measured execution costs.
+    Public-data simulation only. No account balances, transfers, or live orders.
+    Slippage is estimated on each side; transfer_cost_pct is a user estimate.
     """
     errors, opportunities = [], []
     try:
@@ -90,10 +154,10 @@ def scan_markets(
         local = {}
         errors.append(f"Bitpin API: {type(error).__name__}: {error}")
     try:
-        global_markets = binance_data()
+        global_markets = mexc_data()
     except Exception as error:
         global_markets = {}
-        errors.append(f"Binance API: {type(error).__name__}: {error}")
+        errors.append(f"MEXC API: {type(error).__name__}: {error}")
 
     slippage = max(0.0, float(slippage_pct)) / 100
     transfer_cost = max(0.0, float(transfer_cost_pct)) / 100
@@ -101,7 +165,7 @@ def scan_markets(
     for symbol in sorted(set(local) & set(global_markets)):
         venues = [
             ("Bitpin", local[symbol], fee_local),
-            ("Binance", global_markets[symbol], fee_global),
+            ("MEXC", global_markets[symbol], fee_global),
         ]
         for buy_name, buy, buy_fee in venues:
             for sell_name, sell, sell_fee in venues:
@@ -125,16 +189,12 @@ def scan_markets(
                         "sell_bid": bid,
                         "spread_pct": round(raw_pct, 4),
                         "net_spread_pct": round(net_pct, 4),
-                        "estimated_cost_pct": round(
-                            (raw_pct - net_pct), 4
-                        ),
+                        "estimated_cost_pct": round(raw_pct - net_pct, 4),
                         "note": (
-                            "برآوردی؛ لغزش و انتقال دستی‌اند؛ "
-                            "عمق سفارش و امکان انتقال زنده تأیید نشده"
+                            "شبیه‌سازی بر پایه بهترین قیمت؛ عمق کامل، موجودی، "
+                            "انتقال و اجرای سفارش تأیید نشده"
                         ),
                     })
 
-    opportunities.sort(
-        key=lambda item: item["net_spread_pct"], reverse=True
-    )
+    opportunities.sort(key=lambda item: item["net_spread_pct"], reverse=True)
     return {"opportunities": opportunities, "errors": errors}
