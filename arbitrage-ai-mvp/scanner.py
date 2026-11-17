@@ -1,16 +1,16 @@
 import time
 import requests
 
-# Bitpin provides the same public REST API on these domains.
+# Bitpin public market-data API (no API key required).
 BITPIN_BASES = (
     "https://api.bitpin.org/api/v1",
     "https://api.bitpin.ir/api/v1",
     "https://api.bitpin.market/api/v1",
 )
-MEXC = "https://api.mexc.com/api/v3"
+NOBITEX = "https://apiv2.nobitex.ir"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; ArbitrageAI/0.3; +https://github.com/)",
+    "User-Agent": "Mozilla/5.0 (compatible; ArbitrageAI/0.4)",
     "Accept": "application/json",
 }
 
@@ -20,9 +20,8 @@ def get_json(url, retries=2):
     for attempt in range(retries + 1):
         try:
             response = requests.get(url, timeout=(5, 15), headers=HEADERS)
-            # Retry transient rate-limit/server responses only.
             if response.status_code in (429, 500, 502, 503, 504) and attempt < retries:
-                time.sleep(1.0 * (attempt + 1))
+                time.sleep(attempt + 1)
                 continue
             response.raise_for_status()
             return response.json()
@@ -31,7 +30,7 @@ def get_json(url, retries=2):
             status = getattr(getattr(error, "response", None), "status_code", None)
             if status not in (None, 429, 500, 502, 503, 504) or attempt >= retries:
                 raise
-            time.sleep(1.0 * (attempt + 1))
+            time.sleep(attempt + 1)
     raise last_error
 
 
@@ -81,14 +80,10 @@ def bitpin_data():
             break
         except requests.RequestException as error:
             last_error = error
-            # Try the documented alternate Bitpin domains for access/routing errors.
-            continue
-
     if payload is None:
         status = getattr(getattr(last_error, "response", None), "status_code", "network")
         raise RuntimeError(
-            f"همه دامنه‌های عمومی بیت‌پین ناموفق بودند (آخرین وضعیت: {status}). "
-            "اگر 403 باقی است، محدودیت IP/دسترسی سمت بیت‌پین یا میزبان را بررسی کنید."
+            f"همه دامنه‌های عمومی بیت‌پین ناموفق بودند (آخرین وضعیت: {status})."
         ) from last_error
 
     markets = {}
@@ -106,34 +101,44 @@ def bitpin_data():
             markets[symbol] = {"bid": bid or last, "ask": ask or last}
     if not markets:
         raise RuntimeError(
-            f"پاسخ {successful_base} دریافت شد، اما ساختار نمادها قابل شناسایی نبود."
+            f"پاسخ {successful_base} دریافت شد، اما نمادهای بیت‌پین شناسایی نشدند."
         )
     return markets
 
 
-def mexc_data():
-    payload = get_json(f"{MEXC}/ticker/bookTicker")
+def nobitex_data():
+    # Official public endpoint: no token required. /all returns all order books.
+    payload = get_json(f"{NOBITEX}/v3/orderbook/all")
+    if not isinstance(payload, dict) or payload.get("status") != "ok":
+        raise RuntimeError("پاسخ دفتر سفارش عمومی نوبیتکس معتبر نیست.")
+
     markets = {}
-    for item in rows(payload):
-        if not isinstance(item, dict):
+    quotes = ("USDT", "USDC", "IRT", "RLS", "BTC", "ETH")
+    for raw_symbol, book in payload.items():
+        if raw_symbol in ("status", "message") or not isinstance(book, dict):
             continue
-        symbol = normalize_symbol(
-            item.get("symbol"),
-            ("USDT", "USDC", "BTC", "ETH", "EUR"),
-        )
-        bid = val(item, "bidPrice", "bid")
-        ask = val(item, "askPrice", "ask")
-        bid_qty = val(item, "bidQty", "bidSize")
-        ask_qty = val(item, "askQty", "askSize")
-        if symbol and bid and ask:
-            markets[symbol] = {
-                "bid": bid,
-                "ask": ask,
-                "bid_qty": bid_qty,
-                "ask_qty": ask_qty,
-            }
+        symbol = normalize_symbol(raw_symbol, quotes)
+        bids = book.get("bids") or []
+        asks = book.get("asks") or []
+        try:
+            best_bid = max((float(level[0]), float(level[1])) for level in bids if len(level) >= 2)
+            best_ask = min((float(level[0]), float(level[1])) for level in asks if len(level) >= 2)
+        except (ValueError, TypeError):
+            continue
+        if best_bid[0] <= 0 or best_ask[0] <= 0:
+            continue
+
+        # Nobitex quotes IRT market prices in Rial; Bitpin IRT is Toman.
+        # Convert Nobitex IRT prices to Toman before comparing.
+        divisor = 10.0 if symbol.endswith("/IRT") else 1.0
+        markets[symbol] = {
+            "bid": best_bid[0] / divisor,
+            "ask": best_ask[0] / divisor,
+            "bid_qty": best_bid[1],
+            "ask_qty": best_ask[1],
+        }
     if not markets:
-        raise RuntimeError("MEXC پاسخی داد، اما داده معتبر دفتر سفارش دریافت نشد.")
+        raise RuntimeError("از نوبیتکس دفتر سفارش معتبر دریافت نشد.")
     return markets
 
 
@@ -143,10 +148,7 @@ def scan_markets(
     slippage_pct=0.20,
     transfer_cost_pct=0.30,
 ):
-    """
-    Public-data simulation only. No account balances, transfers, or live orders.
-    Slippage is estimated on each side; transfer_cost_pct is a user estimate.
-    """
+    """Public-data simulation only. No account balances, transfers, or live orders."""
     errors, opportunities = [], []
     try:
         local = bitpin_data()
@@ -154,18 +156,18 @@ def scan_markets(
         local = {}
         errors.append(f"Bitpin API: {type(error).__name__}: {error}")
     try:
-        global_markets = mexc_data()
+        nobitex = nobitex_data()
     except Exception as error:
-        global_markets = {}
-        errors.append(f"MEXC API: {type(error).__name__}: {error}")
+        nobitex = {}
+        errors.append(f"Nobitex API: {type(error).__name__}: {error}")
 
     slippage = max(0.0, float(slippage_pct)) / 100
     transfer_cost = max(0.0, float(transfer_cost_pct)) / 100
 
-    for symbol in sorted(set(local) & set(global_markets)):
+    for symbol in sorted(set(local) & set(nobitex)):
         venues = [
             ("Bitpin", local[symbol], fee_local),
-            ("MEXC", global_markets[symbol], fee_global),
+            ("Nobitex", nobitex[symbol], fee_global),
         ]
         for buy_name, buy, buy_fee in venues:
             for sell_name, sell, sell_fee in venues:
@@ -191,8 +193,8 @@ def scan_markets(
                         "net_spread_pct": round(net_pct, 4),
                         "estimated_cost_pct": round(raw_pct - net_pct, 4),
                         "note": (
-                            "شبیه‌سازی بر پایه بهترین قیمت؛ عمق کامل، موجودی، "
-                            "انتقال و اجرای سفارش تأیید نشده"
+                            "بهترین قیمت دفتر سفارش؛ حجم، موجودی، انتقال و اجرای "
+                            "سفارش هنوز در این نسخه تأیید نمی‌شود"
                         ),
                     })
 
