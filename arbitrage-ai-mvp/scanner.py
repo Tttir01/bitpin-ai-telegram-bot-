@@ -70,21 +70,24 @@ def normalize_symbol(raw, quotes):
 
 
 def bitpin_data():
-    last_error = None
+    failures = []
     payload = None
     successful_base = None
     for base in BITPIN_BASES:
+        url = f"{base}/mkt/tickers/"
         try:
-            payload = get_json(f"{base}/mkt/tickers/")
+            payload = get_json(url)
             successful_base = base
             break
         except requests.RequestException as error:
-            last_error = error
+            status = getattr(getattr(error, "response", None), "status_code", None)
+            failures.append(f"{base}: {type(error).__name__}: {error} (HTTP={status})")
     if payload is None:
-        status = getattr(getattr(last_error, "response", None), "status_code", "network")
+        detail = " | ".join(failures) or "بدون جزئیات خطا"
         raise RuntimeError(
-            f"همه دامنه‌های عمومی بیت‌پین ناموفق بودند (آخرین وضعیت: {status})."
-        ) from last_error
+            "اتصال خروجی Render به API عمومی بیت‌پین برقرار نشد. "
+            "جزئیات هر دامنه: " + detail
+        )
 
     markets = {}
     for item in rows(payload):
