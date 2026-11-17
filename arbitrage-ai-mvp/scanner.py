@@ -64,7 +64,10 @@ def parse_levels(levels, side):
 
 
 def wallex_books():
+    request_started = time.time()
     payload = get_json(f"{WALLEX}/v2/depth/all")
+    received_at = time.time()
+    latency_ms = round((received_at - request_started) * 1000)
     if not isinstance(payload, dict) or payload.get("success") is not True:
         raise RuntimeError("پاسخ دفتر سفارش عمومی والکس معتبر نیست.")
     result = payload.get("result") or payload.get("data") or {}
@@ -82,6 +85,8 @@ def wallex_books():
             books[symbol] = {
                 "asks": asks, "bids": bids,
                 "updated_at": None,
+                "received_at": received_at,
+                "latency_ms": latency_ms,
                 "source": "Wallex",
             }
     if not books:
@@ -90,7 +95,10 @@ def wallex_books():
 
 
 def nobitex_books():
+    request_started = time.time()
     payload = get_json(f"{NOBITEX}/v3/orderbook/all")
+    received_at = time.time()
+    latency_ms = round((received_at - request_started) * 1000)
     if not isinstance(payload, dict) or payload.get("status") != "ok":
         raise RuntimeError("پاسخ دفتر سفارش عمومی نوبیتکس معتبر نیست.")
     books = {}
@@ -115,6 +123,8 @@ def nobitex_books():
         books[symbol] = {
             "asks": asks, "bids": bids,
             "updated_at": updated,
+            "received_at": received_at,
+            "latency_ms": latency_ms,
             "source": "Nobitex",
         }
     if not books:
@@ -144,15 +154,31 @@ def sell_into_bids(bids, base_qty, fee, slippage):
     remaining = base_qty
     raw_proceeds = 0.0
     sold = 0.0
+    levels_used = 0
     for price, available in bids:
         if remaining <= 0:
             break
         qty = min(available, remaining)
+        if qty > 0:
+            levels_used += 1
         raw_proceeds += price * qty
         sold += qty
         remaining -= qty
     net_proceeds = raw_proceeds * (1 - fee) * (1 - slippage)
-    return sold, raw_proceeds, net_proceeds
+    return sold, raw_proceeds, net_proceeds, levels_used
+
+
+def levels_required(levels, quantity):
+    remaining = quantity
+    used = 0
+    for _, available in levels:
+        if remaining <= 1e-12:
+            break
+        take = min(available, remaining)
+        if take > 0:
+            used += 1
+            remaining -= take
+    return used
 
 
 def scan_markets(
@@ -218,7 +244,7 @@ def scan_markets(
                 )
                 if bought_qty <= 0:
                     continue
-                sold_qty, raw_sell_value, net_sell_value = sell_into_bids(
+                sold_qty, raw_sell_value, net_sell_value, sell_levels_used = sell_into_bids(
                     sell_book["bids"], bought_qty, sell_fee, slippage
                 )
                 if sold_qty <= 0:
@@ -235,10 +261,26 @@ def scan_markets(
                 if raw_buy_cost <= 0:
                     continue
 
-                ages = [age for age in (buy_age, sell_age) if age is not None]
+                buy_received_age = max(0.0, now - buy_book["received_at"])
+                sell_received_age = max(0.0, now - sell_book["received_at"])
+                effective_buy_age = buy_age if buy_age is not None else buy_received_age
+                effective_sell_age = sell_age if sell_age is not None else sell_received_age
+                snapshot_skew = abs(buy_book["received_at"] - sell_book["received_at"])
+                buy_vwap = raw_buy_cost / bought_qty
+                sell_vwap = raw_sell_value / sold_qty
                 age_label = (
-                    f"مهر زمانی نوبیتکس: {max(ages):.0f} ثانیه"
-                    if ages else "والکس زمان سرور اردربوک را اعلام نمی‌کند"
+                    f"مهر صرافی: خرید {effective_buy_age:.1f}s / فروش {effective_sell_age:.1f}s؛ "
+                    "زمان والکس فقط زمان دریافت محلی است"
+                )
+                freshness_ok = (
+                    effective_buy_age <= max_book_age_seconds
+                    and effective_sell_age <= max_book_age_seconds
+                )
+                snapshot_ok = snapshot_skew <= 15
+                validation_status = (
+                    "قابل بررسی در شبیه‌سازی"
+                    if freshness_ok and snapshot_ok and net_profit > 0
+                    else "نیازمند بررسی داده/زمان"
                 )
                 opportunities.append({
                     "symbol": symbol,
@@ -253,6 +295,17 @@ def scan_markets(
                     "used_capital_toman": round(used_capital),
                     "unused_capital_toman": round(max(0, capital_toman - used_capital)),
                     "base_quantity": bought_qty,
+                    "buy_vwap": round(buy_vwap, 8),
+                    "sell_vwap": round(sell_vwap, 8),
+                    "buy_levels_used": levels_required(buy_book["asks"], bought_qty),
+                    "sell_levels_used": sell_levels_used,
+                    "depth_coverage_pct": round(min(100.0, sold_qty / bought_qty * 100), 2),
+                    "buy_book_age_seconds": round(effective_buy_age, 2),
+                    "sell_book_age_seconds": round(effective_sell_age, 2),
+                    "snapshot_skew_seconds": round(snapshot_skew, 2),
+                    "buy_api_latency_ms": buy_book["latency_ms"],
+                    "sell_api_latency_ms": sell_book["latency_ms"],
+                    "validation_status": validation_status,
                     "buy_gross_toman": round(raw_buy_cost),
                     "sell_gross_toman": round(raw_sell_value),
                     "depth_note": age_label,
