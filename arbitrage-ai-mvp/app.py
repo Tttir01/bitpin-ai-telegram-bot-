@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+import os
 
 import pandas as pd
+import requests
 import streamlit as st
 from scanner import scan_markets
 
@@ -259,9 +261,52 @@ st.divider()
 st.subheader("🧪 سبد معاملات کاغذی")
 st.caption(
     "ثبت معامله در این بخش فقط نتیجه یک شبیه‌سازی روی snapshot فعلی دفتر سفارش است؛ "
-    "هیچ سفارش یا انتقال واقعی انجام نمی‌شود. سوابق فقط تا زمان پایان نشست داشبورد نگهداری می‌شوند."
+    "هیچ سفارش یا انتقال واقعی انجام نمی‌شود. سوابق پس از اتصال امن، در دفتر ابری ذخیره می‌شوند؛ معاملات فقط شبیه‌سازی هستند."
 )
 paper_trades = st.session_state.setdefault("paper_trades", [])
+ledger_url = os.getenv("SUPABASE_URL", "").rstrip("/") + "/functions/v1/arbitrage-paper-ledger"
+ledger_anon_key = os.getenv("SUPABASE_ANON_KEY", "")
+ledger_token = os.getenv("ARBITRAGE_APP_TOKEN", "")
+ledger_ready = bool(os.getenv("SUPABASE_URL") and ledger_anon_key and ledger_token)
+
+def ledger_request(method, payload=None):
+    if not ledger_ready:
+        return None, "تنظیمات اتصال امن به دفتر ابری کامل نیست."
+    headers = {
+        "Authorization": f"Bearer {ledger_anon_key}",
+        "apikey": ledger_anon_key,
+        "x-app-token": ledger_token,
+        "Content-Type": "application/json",
+    }
+    try:
+        response = requests.request(
+            method, ledger_url, headers=headers, json=payload, timeout=15
+        )
+        if response.status_code == 409:
+            return None, "این مسیر در ۳۰ دقیقه اخیر قبلاً ثبت شده است."
+        response.raise_for_status()
+        return response.json(), None
+    except requests.RequestException:
+        return None, "ارتباط با دفتر ابری برقرار نشد؛ سابقه فقط در نشست ذخیره نشد."
+
+if "paper_trades_loaded" not in st.session_state:
+    if ledger_ready:
+        cloud_result, cloud_error = ledger_request("GET")
+        if cloud_error is None:
+            st.session_state["paper_trades"] = [
+                row.get("trade", {}) for row in cloud_result.get("trades", [])
+            ]
+            st.session_state["paper_trades_loaded"] = True
+        else:
+            st.session_state["paper_trades_loaded"] = False
+    else:
+        st.session_state["paper_trades_loaded"] = False
+
+if not ledger_ready:
+    st.warning("اتصال ذخیره دائمی هنوز پیکربندی نشده است؛ معاملات جدید در فضای ابری ثبت نمی‌شوند.")
+elif not st.session_state.get("paper_trades_loaded"):
+    st.warning("بارگذاری سوابق ابری انجام نشد؛ برای جلوگیری از ثبت نادرست، ثبت معامله کاغذی تا اتصال موفق غیرفعال است.")
+
 paper_candidates = pd.DataFrame()
 if not df.empty:
     paper_candidates = df[
@@ -315,7 +360,7 @@ else:
     if st.button(
         "ثبت معامله کاغذی و محاسبه نتیجه",
         type="primary",
-        disabled=recent_same_route,
+        disabled=recent_same_route or not ledger_ready or not st.session_state.get("paper_trades_loaded"),
         key="record_paper_trade",
     ):
         trade = {
@@ -337,12 +382,16 @@ else:
             "بازده خالص (%)": float(selected["net_spread_pct"]),
             "وضعیت": "تکمیل‌شده در شبیه‌سازی",
         }
-        paper_trades.append(trade)
-        st.session_state["paper_trades"] = paper_trades[-500:]
-        st.success(
-            f"نتیجه شبیه‌سازی ثبت شد؛ سود/زیان خالص تخمینی: "
-            f"{trade['سود/زیان خالص (تومان)']:,} تومان"
-        )
+        cloud_result, cloud_error = ledger_request("POST", {"route_key": route_key, "trade": trade})
+        if cloud_error:
+            st.error(f"ثبت در فضای ابری ناموفق بود: {cloud_error}")
+        else:
+            paper_trades.append(trade)
+            st.session_state["paper_trades"] = paper_trades[-500:]
+            st.success(
+                f"معامله کاغذی در فضای ابری ذخیره شد؛ سود/زیان خالص تخمینی: "
+                f"{trade['سود/زیان خالص (تومان)']:,} تومان"
+            )
 
 total_paper_pnl = sum(item["سود/زیان خالص (تومان)"] for item in paper_trades)
 paper_wins = sum(1 for item in paper_trades if item["سود/زیان خالص (تومان)"] > 0)
