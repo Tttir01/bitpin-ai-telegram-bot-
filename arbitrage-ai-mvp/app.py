@@ -256,6 +256,93 @@ else:
     )
 
 st.divider()
+st.subheader("🧪 سبد معاملات کاغذی")
+st.caption(
+    "ثبت معامله در این بخش فقط نتیجه یک شبیه‌سازی روی snapshot فعلی دفتر سفارش است؛ "
+    "هیچ سفارش یا انتقال واقعی انجام نمی‌شود. سوابق فقط تا زمان پایان نشست داشبورد نگهداری می‌شوند."
+)
+paper_trades = st.session_state.setdefault("paper_trades", [])
+paper_trade_ids = st.session_state.setdefault("paper_trade_ids", set())
+paper_candidates = pd.DataFrame()
+if not df.empty:
+    paper_candidates = df[
+        (df["stable_scans"] >= 3)
+        & (df["validation_status"] == "قابل بررسی در شبیه‌سازی")
+        & (df["profit_toman"] > 0)
+        & (df["used_capital_toman"] <= capital)
+    ].copy()
+
+if paper_candidates.empty:
+    st.info("برای ثبت معامله کاغذی، ابتدا باید فرصت مثبت، پایدار در ۳ اسکن و قابل بررسی در شبیه‌سازی وجود داشته باشد.")
+else:
+    candidate_labels = [
+        f"{row['symbol']} | خرید: {row['buy_exchange']} ← فروش: {row['sell_exchange']} | "
+        f"سرمایه: {row['used_capital_toman']:,.0f} تومان | سود تخمینی: {row['profit_toman']:,.0f} تومان"
+        for _, row in paper_candidates.iterrows()
+    ]
+    selected_index = st.selectbox(
+        "انتخاب فرصت برای ثبت در سبد آزمایشی",
+        options=list(range(len(candidate_labels))),
+        format_func=lambda index: candidate_labels[index],
+        key="paper_candidate_select",
+    )
+    selected = paper_candidates.iloc[selected_index]
+    current_scan = st.session_state.get("stability_scan_number", 0)
+    trade_id = (
+        f"{current_scan}|{selected['symbol']}|"
+        f"{selected['buy_exchange']}|{selected['sell_exchange']}"
+    )
+    if trade_id in paper_trade_ids:
+        st.info("این فرصت در اسکن فعلی قبلاً در سبد کاغذی ثبت شده است.")
+    if st.button(
+        "ثبت معامله کاغذی و محاسبه نتیجه",
+        type="primary",
+        disabled=(trade_id in paper_trade_ids),
+        key="record_paper_trade",
+    ):
+        trade = {
+            "زمان": datetime.now(TEHRAN).strftime("%Y-%m-%d %H:%M:%S"),
+            "اسکن": current_scan,
+            "جفت‌ارز": str(selected["symbol"]),
+            "صرافی خرید": str(selected["buy_exchange"]),
+            "صرافی فروش": str(selected["sell_exchange"]),
+            "سرمایه مصرفی (تومان)": int(selected["used_capital_toman"]),
+            "خرید ناخالص (تومان)": int(selected["buy_gross_toman"]),
+            "فروش ناخالص (تومان)": int(selected["sell_gross_toman"]),
+            "کارمزد خرید (تومان)": int(selected["buy_fee_toman"]),
+            "لغزش خرید (تومان)": int(selected["buy_slippage_toman"]),
+            "کارمزد فروش (تومان)": int(selected["sell_fee_toman"]),
+            "لغزش فروش (تومان)": int(selected["sell_slippage_toman"]),
+            "انتقال و سایر هزینه‌ها (تومان)": int(selected["transfer_cost_toman"]),
+            "کل هزینه‌ها (تومان)": int(selected["total_costs_toman"]),
+            "سود/زیان خالص (تومان)": int(selected["profit_toman"]),
+            "بازده خالص (%)": float(selected["net_spread_pct"]),
+            "وضعیت": "تکمیل‌شده در شبیه‌سازی",
+        }
+        paper_trades.append(trade)
+        st.session_state["paper_trades"] = paper_trades[-500:]
+        paper_trade_ids.add(trade_id)
+        st.session_state["paper_trade_ids"] = paper_trade_ids
+        st.success(
+            f"نتیجه شبیه‌سازی ثبت شد؛ سود/زیان خالص تخمینی: "
+            f"{trade['سود/زیان خالص (تومان)']:,} تومان"
+        )
+
+total_paper_pnl = sum(item["سود/زیان خالص (تومان)"] for item in paper_trades)
+paper_wins = sum(1 for item in paper_trades if item["سود/زیان خالص (تومان)"] > 0)
+paper_losses = sum(1 for item in paper_trades if item["سود/زیان خالص (تومان)"] < 0)
+p1, p2, p3, p4 = st.columns(4)
+p1.metric("تعداد معاملات کاغذی", len(paper_trades))
+p2.metric("سود/زیان خالص تجمعی", f"{total_paper_pnl:,.0f} تومان")
+p3.metric("نتیجه مثبت", paper_wins)
+p4.metric("نتیجه منفی", paper_losses)
+if paper_trades:
+    paper_view = pd.DataFrame(paper_trades)
+    st.dataframe(paper_view.iloc[::-1], width="stretch", hide_index=True)
+else:
+    st.caption("هنوز معامله کاغذی ثبت نشده است. ابتدا فرصت واجد شرایط را از فهرست بالا انتخاب کنید.")
+
+st.divider()
 st.subheader("تاریخچه و گزارش روزانه این نشست")
 history = st.session_state.get("history", [])
 today = datetime.now(TEHRAN).date()
