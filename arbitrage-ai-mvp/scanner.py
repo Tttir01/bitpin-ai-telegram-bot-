@@ -1,16 +1,12 @@
 import time
 import requests
 
-# Bitpin public market-data API (no API key required).
-BITPIN_BASES = (
-    "https://api.bitpin.org/api/v1",
-    "https://api.bitpin.ir/api/v1",
-    "https://api.bitpin.market/api/v1",
-)
+# Wallex public market data; these endpoints do not require an API key.
+WALLEX = "https://api.wallex.ir"
 NOBITEX = "https://apiv2.nobitex.ir"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; ArbitrageAI/0.4)",
+    "User-Agent": "Mozilla/5.0 (compatible; ArbitrageAI/0.5)",
     "Accept": "application/json",
 }
 
@@ -69,43 +65,34 @@ def normalize_symbol(raw, quotes):
     return symbol
 
 
-def bitpin_data():
-    failures = []
-    payload = None
-    successful_base = None
-    for base in BITPIN_BASES:
-        url = f"{base}/mkt/tickers/"
-        try:
-            payload = get_json(url)
-            successful_base = base
-            break
-        except requests.RequestException as error:
-            status = getattr(getattr(error, "response", None), "status_code", None)
-            failures.append(f"{base}: {type(error).__name__}: {error} (HTTP={status})")
-    if payload is None:
-        detail = " | ".join(failures) or "بدون جزئیات خطا"
-        raise RuntimeError(
-            "اتصال خروجی Render به API عمومی بیت‌پین برقرار نشد. "
-            "جزئیات هر دامنه: " + detail
-        )
+def wallex_data():
+    payload = get_json(f"{WALLEX}/v1/markets")
+    if not isinstance(payload, dict) or payload.get("success") is not True:
+        raise RuntimeError("پاسخ فهرست بازارهای عمومی والکس معتبر نیست.")
+
+    result = payload.get("result") or {}
+    symbols = result.get("symbols") or {}
+    if not isinstance(symbols, dict):
+        raise RuntimeError("ساختار فهرست نمادهای والکس قابل شناسایی نیست.")
 
     markets = {}
-    for item in rows(payload):
+    for raw_symbol, item in symbols.items():
         if not isinstance(item, dict):
             continue
         symbol = normalize_symbol(
-            item.get("symbol") or item.get("market") or item.get("code"),
-            ("USDT", "USDC", "BTC", "ETH", "IRT", "IRR"),
+            item.get("symbol") or raw_symbol,
+            ("USDT", "USDC", "TMN", "IRT", "IRR", "BTC", "ETH"),
         )
-        last = val(item, "last", "price", "close", "last_price")
-        bid = val(item, "bid", "best_bid", "bid_price")
-        ask = val(item, "ask", "best_ask", "ask_price")
-        if symbol and last:
-            markets[symbol] = {"bid": bid or last, "ask": ask or last}
+        # Wallex uses TMN (Toman). Normalize it to IRT as the app's
+        # common Toman-denominated comparison key; no price scaling is needed.
+        symbol = symbol.replace("/TMN", "/IRT")
+        stats = item.get("stats") or {}
+        bid = val(stats, "bidPrice", "bid")
+        ask = val(stats, "askPrice", "ask")
+        if symbol and bid and ask:
+            markets[symbol] = {"bid": bid, "ask": ask}
     if not markets:
-        raise RuntimeError(
-            f"پاسخ {successful_base} دریافت شد، اما نمادهای بیت‌پین شناسایی نشدند."
-        )
+        raise RuntimeError("از والکس داده معتبر قیمت خرید و فروش دریافت نشد.")
     return markets
 
 
@@ -131,8 +118,7 @@ def nobitex_data():
         if best_bid[0] <= 0 or best_ask[0] <= 0:
             continue
 
-        # Nobitex quotes IRT market prices in Rial; Bitpin IRT is Toman.
-        # Convert Nobitex IRT prices to Toman before comparing.
+        # Nobitex quotes IRT market prices in Rial; convert to Toman.
         divisor = 10.0 if symbol.endswith("/IRT") else 1.0
         markets[symbol] = {
             "bid": best_bid[0] / divisor,
@@ -147,17 +133,17 @@ def nobitex_data():
 
 def scan_markets(
     fee_local=0.0025,
-    fee_global=0.001,
+    fee_global=0.0025,
     slippage_pct=0.20,
     transfer_cost_pct=0.30,
 ):
     """Public-data simulation only. No account balances, transfers, or live orders."""
     errors, opportunities = [], []
     try:
-        local = bitpin_data()
+        local = wallex_data()
     except Exception as error:
         local = {}
-        errors.append(f"Bitpin API: {type(error).__name__}: {error}")
+        errors.append(f"Wallex API: {type(error).__name__}: {error}")
     try:
         nobitex = nobitex_data()
     except Exception as error:
@@ -169,7 +155,7 @@ def scan_markets(
 
     for symbol in sorted(set(local) & set(nobitex)):
         venues = [
-            ("Bitpin", local[symbol], fee_local),
+            ("Wallex", local[symbol], fee_local),
             ("Nobitex", nobitex[symbol], fee_global),
         ]
         for buy_name, buy, buy_fee in venues:
@@ -196,7 +182,7 @@ def scan_markets(
                         "net_spread_pct": round(net_pct, 4),
                         "estimated_cost_pct": round(raw_pct - net_pct, 4),
                         "note": (
-                            "بهترین قیمت دفتر سفارش؛ حجم، موجودی، انتقال و اجرای "
+                            "قیمت‌های برتر اعلام‌شده؛ حجم قابل اجرا، موجودی، انتقال و اجرای "
                             "سفارش هنوز در این نسخه تأیید نمی‌شود"
                         ),
                     })
