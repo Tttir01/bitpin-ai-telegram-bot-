@@ -430,26 +430,39 @@ if paper_trades:
     pnl_col = "سود/زیان خالص (تومان)"
     roi_col = "بازده خالص (%)"
     cost_col = "کل هزینه‌ها (تومان)"
-    paper_view[pnl_col] = pd.to_numeric(paper_view.get(pnl_col), errors="coerce").fillna(0)
+    if pnl_col not in paper_view:
+        paper_view[pnl_col] = 0
+    paper_view[pnl_col] = pd.to_numeric(paper_view[pnl_col], errors="coerce").fillna(0)
     if roi_col in paper_view:
         paper_view[roi_col] = pd.to_numeric(paper_view[roi_col], errors="coerce").fillna(0)
+    else:
+        paper_view[roi_col] = 0
     if cost_col in paper_view:
         paper_view[cost_col] = pd.to_numeric(paper_view[cost_col], errors="coerce").fillna(0)
+    else:
+        paper_view[cost_col] = 0
 
     total_count = len(paper_view)
     breakeven_count = int((paper_view[pnl_col] == 0).sum())
-    win_rate = (paper_wins / total_count * 100) if total_count else 0
+    positive_count = int((paper_view[pnl_col] > 0).sum())
+    negative_count = int((paper_view[pnl_col] < 0).sum())
+    win_rate = (positive_count / total_count * 100) if total_count else 0
     average_pnl = float(paper_view[pnl_col].mean()) if total_count else 0
-    average_roi = float(paper_view[roi_col].mean()) if roi_col in paper_view else 0
-    total_costs = float(paper_view[cost_col].sum()) if cost_col in paper_view else 0
+    average_roi = float(paper_view[roi_col].mean()) if total_count else 0
+    total_costs = float(paper_view[cost_col].sum()) if total_count else 0
 
-    st.markdown("#### 📊 شاخص‌های عملکرد")
+    st.markdown("#### 📊 گزارش عملکرد معاملات")
     a1, a2, a3, a4 = st.columns(4)
-    a1.metric("نرخ معاملات مثبت", f"{win_rate:.1f}%")
-    a2.metric("میانگین سود/زیان هر معامله", f"{average_pnl:,.0f} تومان")
+    a1.metric("درصد معاملات سودده", f"{win_rate:.1f}%")
+    a2.metric("میانگین سود یا زیان هر معامله", f"{average_pnl:,.0f} تومان")
     a3.metric("میانگین بازده خالص", f"{average_roi:.2f}%")
-    a4.metric("هزینه‌های کسرشده تجمعی", f"{total_costs:,.0f} تومان")
-    st.caption(f"معاملات سربه‌سر: {breakeven_count} | بهترین نتیجه: {paper_view[pnl_col].max():,.0f} تومان | ضعیف‌ترین نتیجه: {paper_view[pnl_col].min():,.0f} تومان")
+    a4.metric("مجموع هزینه‌های محاسبه‌شده", f"{total_costs:,.0f} تومان")
+    st.caption(
+        f"سودده: {positive_count} معامله | زیان‌ده: {negative_count} معامله | "
+        f"بدون سود و زیان: {breakeven_count} معامله | "
+        f"بهترین نتیجه: {paper_view[pnl_col].max():,.0f} تومان | "
+        f"ضعیف‌ترین نتیجه: {paper_view[pnl_col].min():,.0f} تومان"
+    )
 
     if "زمان" in paper_view:
         paper_view["_زمان_گزارش"] = pd.to_datetime(paper_view["زمان"], errors="coerce")
@@ -461,21 +474,30 @@ if paper_trades:
                 سود_زیان_روزانه=(pnl_col, "sum"),
             ).sort_values("تاریخ")
             daily["سود_زیان_تجمعی"] = daily["سود_زیان_روزانه"].cumsum()
-            st.markdown("#### روند سود و زیان روزانه")
-            chart_data = daily.set_index("تاریخ")[["سود_زیان_روزانه", "سود_زیان_تجمعی"]]
-            chart_data.columns = ["سود/زیان روزانه (تومان)", "سود/زیان تجمعی (تومان)"]
-            st.line_chart(chart_data)
             daily_view = daily.rename(columns={
                 "تعداد_معامله": "تعداد معاملات",
                 "سود_زیان_روزانه": "سود/زیان روزانه (تومان)",
                 "سود_زیان_تجمعی": "سود/زیان تجمعی (تومان)",
             })
+            st.markdown("#### 📈 نمودار سود و زیان بر اساس روز")
+            st.line_chart(
+                daily_view,
+                x="تاریخ",
+                y=["سود/زیان روزانه (تومان)", "سود/زیان تجمعی (تومان)"],
+                x_label="تاریخ",
+                y_label="مبلغ به تومان",
+            )
+            st.markdown("#### خلاصه روزانه")
             st.dataframe(daily_view, width="stretch", hide_index=True)
 
-    st.markdown("#### سوابق معاملات")
-    st.dataframe(paper_view.drop(columns=["_زمان_گزارش"], errors="ignore").iloc[::-1], width="stretch", hide_index=True)
+    st.markdown("#### سوابق معاملات ثبت‌شده")
+    st.dataframe(
+        paper_view.drop(columns=["_زمان_گزارش"], errors="ignore").iloc[::-1],
+        width="stretch",
+        hide_index=True,
+    )
 else:
-    st.caption("هنوز معامله کاغذی ثبت نشده است. ابتدا فرصت واجد شرایط را از فهرست بالا انتخاب کنید.")
+    st.info("هنوز معامله کاغذی ثبت نشده است. ابتدا یک فرصت واجد شرایط را انتخاب کنید.")
 
 st.divider()
 st.subheader("تاریخچه و گزارش روزانه این نشست")
