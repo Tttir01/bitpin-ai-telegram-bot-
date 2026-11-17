@@ -265,8 +265,8 @@ st.caption(
 )
 paper_trades = st.session_state.setdefault("paper_trades", [])
 ledger_url = os.getenv("SUPABASE_URL", "").rstrip("/") + "/functions/v1/arbitrage-paper-ledger"
-ledger_anon_key = os.getenv("SUPABASE_ANON_KEY", "")
-ledger_token = os.getenv("ARBITRAGE_APP_TOKEN", "")
+ledger_anon_key = "".join(os.getenv("SUPABASE_ANON_KEY", "").split())
+ledger_token = "".join(os.getenv("ARBITRAGE_APP_TOKEN", "").split())
 ledger_ready = bool(os.getenv("SUPABASE_URL") and ledger_anon_key and ledger_token)
 
 def ledger_request(method, payload=None):
