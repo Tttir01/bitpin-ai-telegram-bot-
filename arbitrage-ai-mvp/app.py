@@ -15,7 +15,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.title("📈 هوش مصنوعی آربیتراژ")
-st.caption("نسخه آزمایشی ۰.۸ | تشخیص فرصت پایدار در ۳ اسکن متوالی")
+st.caption("نسخه آزمایشی ۰.۹ | گزارش عملکرد معاملات کاغذی و تشخیص فرصت پایدار")
 st.warning(
     "این نسخه سفارش واقعی ثبت نمی‌کند. سودها برآورد شبیه‌سازی بر اساس سطوح قابل مشاهده دفتر سفارش هستند؛ "
     "موجودی حساب، امکان انتقال، شبکه انتقال و تغییر قیمت تا زمان اجرای واقعی تأیید نمی‌شوند."
@@ -424,9 +424,56 @@ p1.metric("تعداد معاملات کاغذی", len(paper_trades))
 p2.metric("سود/زیان خالص تجمعی", f"{total_paper_pnl:,.0f} تومان")
 p3.metric("نتیجه مثبت", paper_wins)
 p4.metric("نتیجه منفی", paper_losses)
+
 if paper_trades:
     paper_view = pd.DataFrame(paper_trades)
-    st.dataframe(paper_view.iloc[::-1], width="stretch", hide_index=True)
+    pnl_col = "سود/زیان خالص (تومان)"
+    roi_col = "بازده خالص (%)"
+    cost_col = "کل هزینه‌ها (تومان)"
+    paper_view[pnl_col] = pd.to_numeric(paper_view.get(pnl_col), errors="coerce").fillna(0)
+    if roi_col in paper_view:
+        paper_view[roi_col] = pd.to_numeric(paper_view[roi_col], errors="coerce").fillna(0)
+    if cost_col in paper_view:
+        paper_view[cost_col] = pd.to_numeric(paper_view[cost_col], errors="coerce").fillna(0)
+
+    total_count = len(paper_view)
+    breakeven_count = int((paper_view[pnl_col] == 0).sum())
+    win_rate = (paper_wins / total_count * 100) if total_count else 0
+    average_pnl = float(paper_view[pnl_col].mean()) if total_count else 0
+    average_roi = float(paper_view[roi_col].mean()) if roi_col in paper_view else 0
+    total_costs = float(paper_view[cost_col].sum()) if cost_col in paper_view else 0
+
+    st.markdown("#### 📊 شاخص‌های عملکرد")
+    a1, a2, a3, a4 = st.columns(4)
+    a1.metric("نرخ معاملات مثبت", f"{win_rate:.1f}%")
+    a2.metric("میانگین سود/زیان هر معامله", f"{average_pnl:,.0f} تومان")
+    a3.metric("میانگین بازده خالص", f"{average_roi:.2f}%")
+    a4.metric("هزینه‌های کسرشده تجمعی", f"{total_costs:,.0f} تومان")
+    st.caption(f"معاملات سربه‌سر: {breakeven_count} | بهترین نتیجه: {paper_view[pnl_col].max():,.0f} تومان | ضعیف‌ترین نتیجه: {paper_view[pnl_col].min():,.0f} تومان")
+
+    if "زمان" in paper_view:
+        paper_view["_زمان_گزارش"] = pd.to_datetime(paper_view["زمان"], errors="coerce")
+        dated = paper_view.dropna(subset=["_زمان_گزارش"]).copy()
+        if not dated.empty:
+            dated["تاریخ"] = dated["_زمان_گزارش"].dt.strftime("%Y-%m-%d")
+            daily = dated.groupby("تاریخ", as_index=False).agg(
+                تعداد_معامله=(pnl_col, "count"),
+                سود_زیان_روزانه=(pnl_col, "sum"),
+            ).sort_values("تاریخ")
+            daily["سود_زیان_تجمعی"] = daily["سود_زیان_روزانه"].cumsum()
+            st.markdown("#### روند سود و زیان روزانه")
+            chart_data = daily.set_index("تاریخ")[["سود_زیان_روزانه", "سود_زیان_تجمعی"]]
+            chart_data.columns = ["سود/زیان روزانه (تومان)", "سود/زیان تجمعی (تومان)"]
+            st.line_chart(chart_data)
+            daily_view = daily.rename(columns={
+                "تعداد_معامله": "تعداد معاملات",
+                "سود_زیان_روزانه": "سود/زیان روزانه (تومان)",
+                "سود_زیان_تجمعی": "سود/زیان تجمعی (تومان)",
+            })
+            st.dataframe(daily_view, width="stretch", hide_index=True)
+
+    st.markdown("#### سوابق معاملات")
+    st.dataframe(paper_view.drop(columns=["_زمان_گزارش"], errors="ignore").iloc[::-1], width="stretch", hide_index=True)
 else:
     st.caption("هنوز معامله کاغذی ثبت نشده است. ابتدا فرصت واجد شرایط را از فهرست بالا انتخاب کنید.")
 
