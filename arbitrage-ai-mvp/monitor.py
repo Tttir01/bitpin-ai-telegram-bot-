@@ -25,6 +25,7 @@ def load_state():
 
 def save_state(state):
     try:
+        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         STATE_FILE.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
     except OSError as error:
         print(f"State persistence warning: {error}")
