@@ -286,8 +286,12 @@ def ledger_request(method, payload=None):
             return None, "این مسیر در ۳۰ دقیقه اخیر قبلاً ثبت شده است."
         response.raise_for_status()
         return response.json(), None
-    except requests.RequestException:
-        return None, "ارتباط با دفتر ابری برقرار نشد؛ سابقه فقط در نشست ذخیره نشد."
+    except requests.RequestException as exc:
+        failed_response = getattr(exc, "response", None)
+        if failed_response is not None:
+            detail = (failed_response.text or "").replace("\\n", " ").strip()[:180]
+            return None, f"خطای دفتر ابری (HTTP {failed_response.status_code}): {detail or 'پاسخ نامعتبر'}"
+        return None, f"خطای ارتباط با دفتر ابری: {type(exc).__name__}"
 
 if "paper_trades_loaded" not in st.session_state:
     if ledger_ready:
