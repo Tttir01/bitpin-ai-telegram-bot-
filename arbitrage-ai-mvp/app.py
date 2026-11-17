@@ -319,6 +319,10 @@ if not st.session_state.get("paper_trades_loaded") and not st.session_state.get(
 
 if st.button("🔁 تلاش دوباره برای اتصال دفتر ابری", key="retry_cloud_ledger"):
     load_cloud_ledger()
+    if st.session_state.get("paper_trades_loaded"):
+        st.success("اتصال دفتر ابری با موفقیت برقرار شد؛ سوابق آزمایشی بارگذاری شدند.")
+    else:
+        st.error(f"اتصال دفتر ابری برقرار نشد: {st.session_state.get('ledger_load_error', 'خطای نامشخص')}")
 
 if not ledger_ready:
     st.warning("اتصال ذخیره دائمی هنوز پیکربندی نشده است؛ معاملات جدید در فضای ابری ثبت نمی‌شوند.")
