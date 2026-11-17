@@ -13,7 +13,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.title("📈 هوش مصنوعی آربیتراژ")
-st.caption("نسخه آزمایشی ۰.۷ | والکس ↔ نوبیتکس | رتبه‌بندی و گزارش شبیه‌سازی")
+st.caption("نسخه آزمایشی ۰.۸ | تشخیص فرصت پایدار در ۳ اسکن متوالی")
 st.warning(
     "این نسخه سفارش واقعی ثبت نمی‌کند. سودها برآورد شبیه‌سازی بر اساس سطوح قابل مشاهده دفتر سفارش هستند؛ "
     "موجودی حساب، امکان انتقال، شبکه انتقال و تغییر قیمت تا زمان اجرای واقعی تأیید نمی‌شوند."
@@ -69,17 +69,50 @@ if should_scan:
             capital_toman=capital,
         )
         st.session_state["scan"] = result
-        st.session_state["scan_settings"] = scan_settings
+        previous_settings = st.session_state.get("stability_settings")
+        if previous_settings != scan_settings:
+            st.session_state["stability_counts"] = {}
+            st.session_state["previous_eligible_keys"] = set()
+            st.session_state["stability_scan_number"] = 0
+        st.session_state["stability_settings"] = scan_settings
+
+        # Count only opportunities that pass the user's net-return and executable-depth filters.
+        eligible_now = {
+            (item.get("symbol"), item.get("buy_exchange"), item.get("sell_exchange"))
+            for item in result.get("opportunities", [])
+            if item.get("net_spread_pct", -999) >= min_net
+            and item.get("profit_toman", 0) > 0
+            and item.get("used_capital_toman", 0) >= min_executable
+        }
+        old_counts = st.session_state.get("stability_counts", {})
+        previous_keys = st.session_state.get("previous_eligible_keys", set())
+        new_counts = {
+            key: (old_counts.get(key, 0) + 1 if key in previous_keys else 1)
+            for key in eligible_now
+        }
+        st.session_state["stability_counts"] = new_counts
+        st.session_state["previous_eligible_keys"] = eligible_now
+        st.session_state["stability_scan_number"] = st.session_state.get("stability_scan_number", 0) + 1
+        st.session_state["scan_stability"] = {
+            "|".join(key): count for key, count in new_counts.items()
+        }
+
         history = st.session_state.setdefault("history", [])
         history.append({
             "time": datetime.now(TEHRAN),
-            "opportunities": len(result.get("opportunities", [])),
+            "opportunities": len(eligible_now),
+            "stable_opportunities": sum(1 for count in new_counts.values() if count >= 3),
             "best_profit": max(
-                [x.get("profit_toman", 0) for x in result.get("opportunities", [])] or [0]
+                [x.get("profit_toman", 0) for x in result.get("opportunities", [])
+                 if (x.get("symbol"), x.get("buy_exchange"), x.get("sell_exchange")) in eligible_now] or [0]
             ),
             "best_symbol": (
-                max(result.get("opportunities", []), key=lambda x: x.get("profit_toman", 0)).get("symbol", "—")
-                if result.get("opportunities") else "—"
+                max(
+                    [x for x in result.get("opportunities", [])
+                     if (x.get("symbol"), x.get("buy_exchange"), x.get("sell_exchange")) in eligible_now],
+                    key=lambda x: x.get("profit_toman", 0)
+                ).get("symbol", "—")
+                if eligible_now else "—"
             ),
         })
         st.session_state["history"] = history[-300:]
@@ -110,8 +143,14 @@ if not df.empty:
     # Wallex's public depth response has no server timestamp, so freshness is penalized.
     freshness_score = 50.0
     df["review_score"] = (return_score * 0.40 + capital_score * 0.30 + freshness_score * 0.30).round(0).astype(int)
+    stability = st.session_state.get("scan_stability", {})
+    df["stable_scans"] = df.apply(
+        lambda row: stability.get("|".join((str(row["symbol"]), str(row["buy_exchange"]), str(row["sell_exchange"]))), 0),
+        axis=1,
+    )
+    df["stable_3"] = df["stable_scans"] >= 3
     df = df.sort_values(
-        ["review_score", "profit_toman"], ascending=[False, False]
+        ["stable_3", "review_score", "profit_toman"], ascending=[False, False, False]
     )
 
 if df.empty:
@@ -128,6 +167,21 @@ else:
     z.metric("بازده خالص", f"{best['net_spread_pct']:.2f}%")
     w.metric("امتیاز بررسی", f"{int(best['review_score'])}/100")
 
+    stable_df = df[df["stable_3"]]
+    st.subheader("تشخیص فرصت پایدار")
+    s1, s2 = st.columns(2)
+    s1.metric("تعداد فرصت‌های پایدار (۳ اسکن)", len(stable_df))
+    s2.metric("تعداد اسکن انجام‌شده", st.session_state.get("stability_scan_number", 0))
+    if not stable_df.empty:
+        st.success("فرصت‌های زیر در ۳ اسکن متوالی واجد شرایط باقی مانده‌اند؛ این فقط پایداری داده و قیمت است، نه تضمین اجرا یا سود.")
+        stable_view = stable_df[["symbol", "buy_exchange", "sell_exchange", "net_spread_pct", "profit_toman", "stable_scans"]].rename(columns={
+            "symbol": "جفت‌ارز", "buy_exchange": "صرافی خرید", "sell_exchange": "صرافی فروش",
+            "net_spread_pct": "بازده خالص ٪", "profit_toman": "سود تخمینی تومان",
+            "stable_scans": "تعداد اسکن متوالی",
+        })
+        st.dataframe(stable_view, width="stretch", hide_index=True)
+    else:
+        st.info("هنوز فرصت واجد شرایطی در ۳ اسکن متوالی تکرار نشده است. برای بررسی، هر بار «دریافت دوباره قیمت‌ها» را بزنید.")
     st.subheader("فرصت‌های قابل بررسی")
     display = df.rename(columns={
         "symbol": "جفت‌ارز",
@@ -143,13 +197,14 @@ else:
         "base_quantity": "حجم قابل تطبیق",
         "depth_note": "تازگی داده",
         "review_score": "امتیاز بررسی از ۱۰۰",
+        "stable_scans": "تعداد اسکن متوالی",
     })
     columns = [
         "جفت‌ارز", "صرافی خرید", "صرافی فروش",
         "بهترین قیمت خرید", "بهترین قیمت فروش", "اختلاف خام ٪",
         "بازده خالص ٪", "سود خالص تخمینی (تومان)",
         "سرمایه درگیر (تومان)", "سرمایه استفاده‌نشده (تومان)",
-        "حجم قابل تطبیق", "تازگی داده", "امتیاز بررسی از ۱۰۰",
+        "حجم قابل تطبیق", "تازگی داده", "امتیاز بررسی از ۱۰۰", "تعداد اسکن متوالی",
     ]
     st.dataframe(display[columns], width="stretch", hide_index=True)
     st.caption(
@@ -173,7 +228,8 @@ h3.metric("آخرین اسکن", today_history[-1]["time"].strftime("%H:%M:%S") 
 if today_history:
     history_df = pd.DataFrame([{
         "زمان": row["time"].strftime("%Y-%m-%d %H:%M:%S"),
-        "تعداد فرصت خام": row["opportunities"],
+        "تعداد فرصت واجد شرایط": row["opportunities"],
+        "فرصت پایدار (۳ اسکن)": row.get("stable_opportunities", 0),
         "بهترین جفت‌ارز": row["best_symbol"],
         "بهترین سود تخمینی (تومان)": row["best_profit"],
     } for row in today_history])
