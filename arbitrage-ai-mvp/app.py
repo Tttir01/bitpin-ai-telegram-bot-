@@ -294,22 +294,37 @@ def ledger_request(method, payload=None):
         return None, f"خطای ارتباط با دفتر ابری: {type(exc).__name__}"
 
 if "paper_trades_loaded" not in st.session_state:
-    if ledger_ready:
-        cloud_result, cloud_error = ledger_request("GET")
-        if cloud_error is None:
-            st.session_state["paper_trades"] = [
-                row.get("trade", {}) for row in cloud_result.get("trades", [])
-            ]
-            st.session_state["paper_trades_loaded"] = True
-        else:
-            st.session_state["paper_trades_loaded"] = False
+    st.session_state["paper_trades_loaded"] = False
+    st.session_state["ledger_load_error"] = "بارگذاری هنوز انجام نشده است."
+
+def load_cloud_ledger():
+    if not ledger_ready:
+        st.session_state["paper_trades_loaded"] = False
+        st.session_state["ledger_load_error"] = "متغیرهای اتصال در Render کامل نیستند."
+        return
+    cloud_result, cloud_error = ledger_request("GET")
+    if cloud_error is None and isinstance(cloud_result, dict):
+        st.session_state["paper_trades"] = [
+            row.get("trade", {}) for row in cloud_result.get("trades", [])
+        ]
+        st.session_state["paper_trades_loaded"] = True
+        st.session_state["ledger_load_error"] = ""
     else:
         st.session_state["paper_trades_loaded"] = False
+        st.session_state["ledger_load_error"] = cloud_error or "پاسخ نامعتبر از دفتر ابری."
+
+if not st.session_state.get("paper_trades_loaded") and not st.session_state.get("ledger_load_attempted"):
+    st.session_state["ledger_load_attempted"] = True
+    load_cloud_ledger()
+
+if st.button("🔁 تلاش دوباره برای اتصال دفتر ابری", key="retry_cloud_ledger"):
+    load_cloud_ledger()
 
 if not ledger_ready:
     st.warning("اتصال ذخیره دائمی هنوز پیکربندی نشده است؛ معاملات جدید در فضای ابری ثبت نمی‌شوند.")
 elif not st.session_state.get("paper_trades_loaded"):
-    st.warning("بارگذاری سوابق ابری انجام نشد؛ برای جلوگیری از ثبت نادرست، ثبت معامله کاغذی تا اتصال موفق غیرفعال است.")
+    st.warning("بارگذاری سوابق ابری انجام نشد؛ ثبت معامله کاغذی غیرفعال است.")
+    st.error(f"جزئیات تشخیصی: {st.session_state.get('ledger_load_error', 'نامشخص')}")
 
 paper_candidates = pd.DataFrame()
 if not df.empty:
