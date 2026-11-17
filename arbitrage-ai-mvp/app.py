@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -262,7 +262,6 @@ st.caption(
     "هیچ سفارش یا انتقال واقعی انجام نمی‌شود. سوابق فقط تا زمان پایان نشست داشبورد نگهداری می‌شوند."
 )
 paper_trades = st.session_state.setdefault("paper_trades", [])
-paper_trade_ids = st.session_state.setdefault("paper_trade_ids", set())
 paper_candidates = pd.DataFrame()
 if not df.empty:
     paper_candidates = df[
@@ -288,16 +287,35 @@ else:
     )
     selected = paper_candidates.iloc[selected_index]
     current_scan = st.session_state.get("stability_scan_number", 0)
-    trade_id = (
-        f"{current_scan}|{selected['symbol']}|"
-        f"{selected['buy_exchange']}|{selected['sell_exchange']}"
+    # Prevent repeated paper entries for the same asset and exchange direction.
+    # A route becomes eligible again only after its 30-minute expiry window.
+    route_key = (
+        f"{selected['symbol']}|{selected['buy_exchange']}|{selected['sell_exchange']}"
     )
-    if trade_id in paper_trade_ids:
-        st.info("این فرصت در اسکن فعلی قبلاً در سبد کاغذی ثبت شده است.")
+    now_local = datetime.now(TEHRAN)
+    recent_same_route = False
+    for existing in paper_trades:
+        existing_key = (
+            f"{existing.get('جفت‌ارز', '')}|"
+            f"{existing.get('صرافی خرید', '')}|{existing.get('صرافی فروش', '')}"
+        )
+        if existing_key != route_key:
+            continue
+        try:
+            recorded_at = datetime.strptime(existing.get("زمان", ""), "%Y-%m-%d %H:%M:%S")
+            if now_local.replace(tzinfo=None) - recorded_at < timedelta(minutes=30):
+                recent_same_route = True
+                break
+        except (TypeError, ValueError):
+            # If an old record has an unreadable timestamp, block conservatively.
+            recent_same_route = True
+            break
+    if recent_same_route:
+        st.warning("این جفت‌ارز با همین مسیر خرید و فروش در ۳۰ دقیقه اخیر ثبت شده است؛ برای جلوگیری از دوباره‌شماری، ثبت مجدد موقتاً مسدود است.")
     if st.button(
         "ثبت معامله کاغذی و محاسبه نتیجه",
         type="primary",
-        disabled=(trade_id in paper_trade_ids),
+        disabled=recent_same_route,
         key="record_paper_trade",
     ):
         trade = {
@@ -321,8 +339,6 @@ else:
         }
         paper_trades.append(trade)
         st.session_state["paper_trades"] = paper_trades[-500:]
-        paper_trade_ids.add(trade_id)
-        st.session_state["paper_trade_ids"] = paper_trade_ids
         st.success(
             f"نتیجه شبیه‌سازی ثبت شد؛ سود/زیان خالص تخمینی: "
             f"{trade['سود/زیان خالص (تومان)']:,} تومان"
