@@ -238,8 +238,10 @@ def scan_markets(
                 sell_depth_qty = sum(qty for _, qty in sell_book["bids"])
                 if sell_depth_qty <= 0:
                     continue
+                # Reserve the transfer-cost allowance inside the user's total capital cap.
+                buy_budget = capital_toman / (1.0 + transfer)
                 bought_qty, raw_buy_cost = buy_from_asks(
-                    buy_book["asks"], capital_toman, sell_depth_qty,
+                    buy_book["asks"], buy_budget, sell_depth_qty,
                     buy_fee, slippage
                 )
                 if bought_qty <= 0:
