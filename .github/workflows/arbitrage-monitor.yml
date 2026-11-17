@@ -1,0 +1,55 @@
+name: Arbitrage AI Market Monitor
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: arbitrage-ai-market-monitor
+  cancel-in-progress: false
+
+jobs:
+  scan-and-alert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r arbitrage-ai-mvp/requirements.txt
+
+      - name: Restore alert cooldown state
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/arbitrage_alert_state.json
+          key: arbitrage-alert-state-${{ github.run_id }}
+          restore-keys: |
+            arbitrage-alert-state-
+
+      - name: Scan Wallex and Nobitex and send Telegram alerts
+        env:
+          CAPITAL_TOMAN: "2000000"
+          MIN_NET_PROFIT_PCT: "0.25"
+          FEE_WALLEX: "0.25"
+          FEE_NOBITEX: "0.25"
+          SLIPPAGE_PCT: "0.20"
+          TRANSFER_COST_PCT: "0.30"
+          ALERT_COOLDOWN_MINUTES: "60"
+          ALERT_STATE_FILE: ".cache/arbitrage_alert_state.json"
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python arbitrage-ai-mvp/monitor.py
+
+      - name: Save alert cooldown state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/arbitrage_alert_state.json
+          key: arbitrage-alert-state-${{ github.run_id }}
