@@ -12,7 +12,7 @@ concurrency:
 jobs:
   scan-and-alert:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,20 +20,20 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install dependencies
         run: pip install -r arbitrage-ai-mvp/requirements.txt
 
-      - name: Restore alert cooldown state
+      - name: Restore stability and paper-validation state
         uses: actions/cache/restore@v4
         with:
-          path: .cache/arbitrage_alert_state.json
-          key: arbitrage-alert-state-${{ github.run_id }}
+          path: .cache/arbitrage_state.json
+          key: arbitrage-state-${{ github.run_id }}
           restore-keys: |
-            arbitrage-alert-state-
+            arbitrage-state-
 
-      - name: Scan Wallex and Nobitex and send Telegram alerts
+      - name: Scan twice and validate public order books
         env:
           CAPITAL_TOMAN: "2000000"
           MIN_NET_PROFIT_PCT: "0.25"
@@ -42,14 +42,16 @@ jobs:
           SLIPPAGE_PCT: "0.20"
           TRANSFER_COST_PCT: "0.30"
           ALERT_COOLDOWN_MINUTES: "60"
-          ALERT_STATE_FILE: ".cache/arbitrage_alert_state.json"
+          PAPER_VALIDATION_COOLDOWN_MINUTES: "30"
+          CONFIRM_DELAY_SECONDS: "5"
+          ALERT_STATE_FILE: ".cache/arbitrage_state.json"
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python arbitrage-ai-mvp/monitor.py
 
-      - name: Save alert cooldown state
+      - name: Persist stability and paper-validation state
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: .cache/arbitrage_alert_state.json
-          key: arbitrage-alert-state-${{ github.run_id }}
+          path: .cache/arbitrage_state.json
+          key: arbitrage-state-${{ github.run_id }}
