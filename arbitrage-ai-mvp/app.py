@@ -6,6 +6,7 @@ import pandas as pd
 import requests
 import streamlit as st
 from scanner import scan_markets
+from telegram_reports import send_scan_report, send_paper_trade_report, telegram_configured
 from risk_gates import (
     is_paper_candidate, profit_change_warning,
     MAX_VWAP_CHANGE_PCT, MAX_MATCHED_VOLUME_CHANGE_PCT,
@@ -173,6 +174,16 @@ if should_scan:
             ),
         })
         st.session_state["history"] = history[-300:]
+
+        # Optional Telegram notification; failures never interrupt market scanning.
+        if telegram_configured():
+            send_scan_report(
+                list(eligible_items.values()),
+                {"|".join(key): count for key, count in new_counts.items()},
+                st.session_state["stability_scan_number"],
+                result.get("diagnostics", {}),
+                result.get("errors", []),
+            )
 
 result = st.session_state.get(
     "scan", {"opportunities": [], "errors": [], "diagnostics": {}}
@@ -589,6 +600,10 @@ else:
                 f"معامله کاغذی در فضای ابری ذخیره شد؛ سود/زیان خالص تخمینی: "
                 f"{trade['سود/زیان خالص (تومان)']:,} تومان"
             )
+            if telegram_configured():
+                telegram_ok, telegram_message = send_paper_trade_report(trade)
+                if not telegram_ok:
+                    st.warning(f"گزارش تلگرام ارسال نشد: {telegram_message}")
 
 total_paper_pnl = sum(item["سود/زیان خالص (تومان)"] for item in paper_trades)
 paper_wins = sum(1 for item in paper_trades if item["سود/زیان خالص (تومان)"] > 0)
