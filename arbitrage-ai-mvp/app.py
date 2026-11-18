@@ -111,10 +111,14 @@ if should_scan:
                 volume_move = abs(current["base_quantity"] / prior["base_quantity"] - 1) * 100 if prior.get("base_quantity") else 999
                 profit_drop = max(0.0, (prior["profit_toman"] - current["profit_toman"]) / prior["profit_toman"] * 100) if prior.get("profit_toman", 0) > 0 else 0
                 passed = buy_move <= 0.30 and sell_move <= 0.30 and volume_move <= 25.0 and profit_drop <= 30.0
+                profit_change = (
+                    (current["profit_toman"] / prior["profit_toman"] - 1) * 100
+                    if prior.get("profit_toman", 0) > 0 else None
+                )
                 market_checks[route_id] = {
                     "passed": passed, "buy_move_pct": buy_move,
                     "sell_move_pct": sell_move, "volume_move_pct": volume_move,
-                    "profit_drop_pct": profit_drop,
+                    "profit_drop_pct": profit_drop, "profit_change_pct": profit_change,
                     "label": "پایدار نسبت به اسکن قبل" if passed else "ناپایدار؛ تغییر محسوس قیمت/حجم/سود",
                 }
             else:
@@ -122,6 +126,7 @@ if should_scan:
                 market_checks[route_id] = {
                     "passed": False, "buy_move_pct": None, "sell_move_pct": None,
                     "volume_move_pct": None, "profit_drop_pct": None,
+                    "profit_change_pct": None,
                     "label": "در انتظار اسکن مقایسه‌ای",
                 }
             if passed and key in previous_keys:
@@ -228,15 +233,36 @@ else:
         "تغییر حجم تطبیق‌یافته حداکثر ۲۵٪ و افت سود حداکثر ۳۰٪. "
         "در صورت عبور از هر حد، شمارنده پایداری از نو آغاز می‌شود."
     )
+    # Show the measured changes against the immediately preceding snapshot.
+    for metric_key, column_name in (
+        ("buy_move_pct", "تغییر میانگین خرید"),
+        ("sell_move_pct", "تغییر میانگین فروش"),
+        ("volume_move_pct", "تغییر حجم تطبیق‌یافته"),
+        ("profit_change_pct", "تغییر سود خالص تخمینی"),
+    ):
+        df[column_name] = df.apply(
+            lambda row: (
+                f"{market_checks.get('|'.join((str(row['symbol']), str(row['buy_exchange']), str(row['sell_exchange']))), {}).get(metric_key):+.3f}%"
+                if market_checks.get(
+                    "|".join((str(row["symbol"]), str(row["buy_exchange"]), str(row["sell_exchange"]))), {}
+                ).get(metric_key) is not None else "—"
+            ),
+            axis=1,
+        )
     market_view = df[[
         "symbol", "buy_exchange", "sell_exchange", "market_stability",
-        "stable_scans"
+        "تغییر میانگین خرید", "تغییر میانگین فروش",
+        "تغییر حجم تطبیق‌یافته", "تغییر سود خالص تخمینی", "stable_scans"
     ]].rename(columns={
         "symbol": "جفت‌ارز", "buy_exchange": "صرافی خرید",
         "sell_exchange": "صرافی فروش", "market_stability": "نتیجه مقایسه اسکن",
         "stable_scans": "شمارنده پایداری",
     })
     st.dataframe(market_view, width="stretch", hide_index=True)
+    st.caption(
+        "درصدها نسبت به اسکن بلافاصله قبلی همان مسیر هستند؛ تغییر سود مثبت یعنی افزایش و منفی یعنی کاهش. "
+        "در اولین اسکن، داده مقایسه‌ای وجود ندارد و «—» نمایش داده می‌شود."
+    )
     st.subheader("تشخیص فرصت پایدار")
     s1, s2 = st.columns(2)
     s1.metric("تعداد فرصت‌های پایدار (۳ اسکن)", len(stable_df))
