@@ -75,6 +75,8 @@ if should_scan:
         if previous_settings != scan_settings:
             st.session_state["stability_counts"] = {}
             st.session_state["previous_eligible_keys"] = set()
+            st.session_state["previous_market_snapshots"] = {}
+            st.session_state["market_stability_checks"] = {}
             st.session_state["stability_scan_number"] = 0
         st.session_state["stability_settings"] = scan_settings
 
