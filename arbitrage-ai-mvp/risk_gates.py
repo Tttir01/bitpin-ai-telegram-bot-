@@ -4,7 +4,7 @@ These helpers deliberately do not place orders or access the ledger.
 """
 import math
 
-MAX_VWAP_CHANGE_PCT = 0.30
+MAX_VWAP_CHANGE_PCT = 0.10
 MAX_MATCHED_VOLUME_CHANGE_PCT = 25.0
 MAX_STABILITY_PROFIT_DROP_PCT = 30.0
 PROFIT_DROP_WARNING_PCT = 3.0
@@ -17,6 +17,14 @@ def _number(value):
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) else None
+
+
+def allowed_vwap_change_pct(net_return_pct):
+    """Cap price movement at 0.10%, or half the net return for thin margins."""
+    margin = _number(net_return_pct)
+    if margin is None or margin <= 0:
+        return 0.0
+    return min(MAX_VWAP_CHANGE_PCT, margin / 2.0)
 
 
 def profit_change_warning(value):

@@ -19,6 +19,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Run risk gate unit tests
+      - name: Install project dependencies
+        run: pip install -r arbitrage-ai-mvp/requirements.txt
+      - name: Run risk and monitor unit tests
         working-directory: arbitrage-ai-mvp
-        run: python -m unittest -v test_risk_gates.py
+        run: python -m unittest -v test_risk_gates.py test_monitor.py
