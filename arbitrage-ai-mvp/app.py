@@ -183,12 +183,16 @@ if not df.empty:
         & (df["profit_toman"] > 0)
         & (df["used_capital_toman"] >= min_executable)
     ].copy()
-    # A transparent review score, not a probability or guarantee of execution.
+    # Transparent review score: include repeat stability, not execution probability.
     return_score = (df["net_spread_pct"].clip(lower=0, upper=1.5) / 1.5) * 100
     capital_score = (df["used_capital_toman"] / max(float(capital), 1)).clip(upper=1) * 100
     # Wallex's public depth response has no server timestamp, so freshness is penalized.
     freshness_score = 50.0
-    df["review_score"] = (return_score * 0.40 + capital_score * 0.30 + freshness_score * 0.30).round(0).astype(int)
+    stability_score = (df["stable_scans"].clip(lower=0, upper=5) / 5) * 100 if "stable_scans" in df else 0.0
+    df["review_score"] = (
+        return_score * 0.35 + capital_score * 0.25
+        + freshness_score * 0.25 + stability_score * 0.15
+    ).round(0).astype(int)
     stability = st.session_state.get("scan_stability", {})
     df["stable_scans"] = df.apply(
         lambda row: stability.get("|".join((str(row["symbol"]), str(row["buy_exchange"]), str(row["sell_exchange"]))), 0),
@@ -207,6 +211,23 @@ if not df.empty:
             "|".join((str(row["symbol"]), str(row["buy_exchange"]), str(row["sell_exchange"]))), {}
         ).get("passed", False),
         axis=1,
+    )
+    df["profit_change_pct"] = df.apply(
+        lambda row: market_checks.get(
+            "|".join((str(row["symbol"]), str(row["buy_exchange"]), str(row["sell_exchange"]))), {}
+        ).get("profit_change_pct"),
+        axis=1,
+    )
+    df["stress_025_pass"] = pd.to_numeric(
+        df.get("stress_profit_slip_025_toman", pd.Series(index=df.index, dtype=float)),
+        errors="coerce",
+    ).fillna(-1) > 0
+    df["profit_change_warning"] = df["profit_change_pct"].apply(
+        lambda value: (
+            "هشدار: افت سود بیش از ۳٪" if pd.notna(value) and value <= -3
+            else "بدون هشدار افت سود" if pd.notna(value)
+            else "در انتظار اسکن مقایسه‌ای"
+        )
     )
     df = df.sort_values(
         ["stable_3", "review_score", "profit_toman"], ascending=[False, False, False]
@@ -231,7 +252,8 @@ else:
     st.caption(
         "مقایسه با اسکن قبلی همان مسیر: تغییر میانگین قیمت خرید یا فروش حداکثر ۰٫۳۰٪، "
         "تغییر حجم تطبیق‌یافته حداکثر ۲۵٪ و افت سود حداکثر ۳۰٪. "
-        "در صورت عبور از هر حد، شمارنده پایداری از نو آغاز می‌شود."
+        "افت سود ۳٪ یا بیشتر هشدار می‌دهد؛ افت ۵٪ یا بیشتر، ثبت کاغذی را مسدود می‌کند. "
+        "شمارنده پایداری نیز در رتبه‌بندی لحاظ می‌شود."
     )
     # Show the measured changes against the immediately preceding snapshot.
     for metric_key, column_name in (
@@ -259,6 +281,24 @@ else:
         "stable_scans": "شمارنده پایداری",
     })
     st.dataframe(market_view, width="stretch", hide_index=True)
+    warning_rows = df[df["profit_change_pct"].notna() & (df["profit_change_pct"] <= -3)]
+    for _, warning_row in warning_rows.iterrows():
+        if warning_row["profit_change_pct"] <= -5:
+            st.error(
+                f"{warning_row['symbol']}: افت سود {warning_row['profit_change_pct']:.2f}%؛ "
+                "ثبت معامله کاغذی تا بهبود شرایط مسدود است."
+            )
+        else:
+            st.warning(
+                f"{warning_row['symbol']}: افت سود {warning_row['profit_change_pct']:.2f}%؛ "
+                "هشدار کاهش سود، نیازمند بررسی مجدد."
+            )
+    stress_failed = df[~df["stress_025_pass"]]
+    for _, stress_row in stress_failed.iterrows():
+        st.warning(
+            f"{stress_row['symbol']}: سود در آزمون لغزش اضافه ۰٫۲۵٪ مثبت نیست؛ "
+            "برای ثبت کاغذی واجد شرایط نیست."
+        )
     st.caption(
         "درصدها نسبت به اسکن بلافاصله قبلی همان مسیر هستند؛ تغییر سود مثبت یعنی افزایش و منفی یعنی کاهش. "
         "در اولین اسکن، داده مقایسه‌ای وجود ندارد و «—» نمایش داده می‌شود."
@@ -450,6 +490,8 @@ if not df.empty:
         & (df["validation_status"] == "قابل بررسی در شبیه‌سازی")
         & (df["profit_toman"] > 0)
         & (df["used_capital_toman"] <= capital)
+        & (df["profit_change_pct"].isna() | (df["profit_change_pct"] > -5))
+        & (df["stress_025_pass"] == True)
     ].copy()
 
 if paper_candidates.empty:
