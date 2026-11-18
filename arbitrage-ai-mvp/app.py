@@ -188,6 +188,19 @@ if not df.empty:
         axis=1,
     )
     df["stable_3"] = df["stable_scans"] >= 3
+    market_checks = st.session_state.get("market_stability_checks", {})
+    df["market_stability"] = df.apply(
+        lambda row: market_checks.get(
+            "|".join((str(row["symbol"]), str(row["buy_exchange"]), str(row["sell_exchange"]))), {}
+        ).get("label", "در انتظار اسکن مقایسه‌ای"),
+        axis=1,
+    )
+    df["market_stable_now"] = df.apply(
+        lambda row: market_checks.get(
+            "|".join((str(row["symbol"]), str(row["buy_exchange"]), str(row["sell_exchange"]))), {}
+        ).get("passed", False),
+        axis=1,
+    )
     df = df.sort_values(
         ["stable_3", "review_score", "profit_toman"], ascending=[False, False, False]
     )
@@ -207,6 +220,21 @@ else:
     w.metric("امتیاز بررسی", f"{int(best['review_score'])}/100")
 
     stable_df = df[df["stable_3"]]
+    st.subheader("کنترل تغییر قیمت و حجم بین دو اسکن")
+    st.caption(
+        "مقایسه با اسکن قبلی همان مسیر: تغییر میانگین قیمت خرید یا فروش حداکثر ۰٫۳۰٪، "
+        "تغییر حجم تطبیق‌یافته حداکثر ۲۵٪ و افت سود حداکثر ۳۰٪. "
+        "در صورت عبور از هر حد، شمارنده پایداری از نو آغاز می‌شود."
+    )
+    market_view = df[[
+        "symbol", "buy_exchange", "sell_exchange", "market_stability",
+        "stable_scans"
+    ]].rename(columns={
+        "symbol": "جفت‌ارز", "buy_exchange": "صرافی خرید",
+        "sell_exchange": "صرافی فروش", "market_stability": "نتیجه مقایسه اسکن",
+        "stable_scans": "شمارنده پایداری",
+    })
+    st.dataframe(market_view, width="stretch", hide_index=True)
     st.subheader("تشخیص فرصت پایدار")
     s1, s2 = st.columns(2)
     s1.metric("تعداد فرصت‌های پایدار (۳ اسکن)", len(stable_df))
@@ -390,6 +418,7 @@ paper_candidates = pd.DataFrame()
 if not df.empty:
     paper_candidates = df[
         (df["stable_scans"] >= 3)
+        & (df["market_stable_now"] == True)
         & (df["validation_status"] == "قابل بررسی در شبیه‌سازی")
         & (df["profit_toman"] > 0)
         & (df["used_capital_toman"] <= capital)
