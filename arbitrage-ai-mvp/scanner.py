@@ -305,10 +305,17 @@ def scan_markets(
                     and effective_sell_age <= max_book_age_seconds
                 )
                 snapshot_ok = snapshot_skew <= 15
-                validation_status = (
-                    "قابل بررسی در شبیه‌سازی"
+                market_data_status = (
+                    "داده بازار مناسب شبیه‌سازی"
                     if freshness_ok and snapshot_ok and net_profit > 0
                     else "نیازمند بررسی داده/زمان"
+                )
+                # Ticker equality is not proof of identical underlying asset or transfer network.
+                # No authenticated, exchange-specific deposit/withdraw/network status is queried here.
+                validation_status = (
+                    "فقط شبیه‌سازی؛ انتقال/شبکه تأییدنشده"
+                    if market_data_status == "داده بازار مناسب شبیه‌سازی"
+                    else market_data_status
                 )
                 opportunities.append({
                     "symbol": symbol,
@@ -338,6 +345,11 @@ def scan_markets(
                     "buy_api_latency_ms": buy_book["latency_ms"],
                     "sell_api_latency_ms": sell_book["latency_ms"],
                     "validation_status": validation_status,
+                    "market_data_status": market_data_status,
+                    "asset_identity_status": "تأییدنشده؛ تطبیق نماد به‌تنهایی کافی نیست",
+                    "network_status": "نامشخص؛ شبکه مشترک و آدرس/ممو بررسی نشده",
+                    "deposit_withdraw_status": "نامشخص؛ وضعیت واریز/برداشت صرافی‌ها بررسی نشده",
+                    "execution_ready": False,
                     "buy_gross_toman": round(raw_buy_cost),
                     "sell_gross_toman": round(raw_sell_value),
                     "buy_fee_toman": round(buy_fee_cost),
