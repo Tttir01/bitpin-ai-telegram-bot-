@@ -6,7 +6,12 @@ import pandas as pd
 import requests
 import streamlit as st
 from scanner import scan_markets
-from risk_gates import is_paper_candidate, profit_change_warning
+from risk_gates import (
+    is_paper_candidate, profit_change_warning,
+    MAX_VWAP_CHANGE_PCT, MAX_MATCHED_VOLUME_CHANGE_PCT,
+    MAX_STABILITY_PROFIT_DROP_PCT, PROFIT_DROP_WARNING_PCT,
+    PAPER_BLOCK_PROFIT_DROP_PCT,
+)
 
 TEHRAN = ZoneInfo("Asia/Tehran")
 
@@ -111,7 +116,12 @@ if should_scan:
                 sell_move = abs(current["sell_vwap"] / prior["sell_vwap"] - 1) * 100 if prior.get("sell_vwap") else 999
                 volume_move = abs(current["base_quantity"] / prior["base_quantity"] - 1) * 100 if prior.get("base_quantity") else 999
                 profit_drop = max(0.0, (prior["profit_toman"] - current["profit_toman"]) / prior["profit_toman"] * 100) if prior.get("profit_toman", 0) > 0 else 0
-                passed = buy_move <= 0.30 and sell_move <= 0.30 and volume_move <= 25.0 and profit_drop <= 30.0
+                passed = (
+                    buy_move <= MAX_VWAP_CHANGE_PCT
+                    and sell_move <= MAX_VWAP_CHANGE_PCT
+                    and volume_move <= MAX_MATCHED_VOLUME_CHANGE_PCT
+                    and profit_drop <= MAX_STABILITY_PROFIT_DROP_PCT
+                )
                 profit_change = (
                     (current["profit_toman"] / prior["profit_toman"] - 1) * 100
                     if prior.get("profit_toman", 0) > 0 else None
@@ -252,9 +262,9 @@ else:
     stable_df = df[df["stable_3"]]
     st.subheader("کنترل تغییر قیمت و حجم بین دو اسکن")
     st.caption(
-        "مقایسه با اسکن قبلی همان مسیر: تغییر میانگین قیمت خرید یا فروش حداکثر ۰٫۳۰٪، "
-        "تغییر حجم تطبیق‌یافته حداکثر ۲۵٪ و افت سود حداکثر ۳۰٪. "
-        "افت سود ۳٪ یا بیشتر هشدار می‌دهد؛ افت ۵٪ یا بیشتر، ثبت کاغذی را مسدود می‌کند. "
+        f"مقایسه با اسکن قبلی همان مسیر: تغییر میانگین قیمت خرید یا فروش حداکثر {MAX_VWAP_CHANGE_PCT:.2f}٪، "
+        f"تغییر حجم تطبیق‌یافته حداکثر {MAX_MATCHED_VOLUME_CHANGE_PCT:.0f}٪ و افت سود برای حفظ پایداری حداکثر {MAX_STABILITY_PROFIT_DROP_PCT:.0f}٪ است. "
+        f"این حد پایداری با هشدار افت سود {PROFIT_DROP_WARNING_PCT:.0f}٪ و مسدودسازی ثبت کاغذی در افت {PAPER_BLOCK_PROFIT_DROP_PCT:.0f}٪ متفاوت است. "
         "شمارنده پایداری نیز در رتبه‌بندی لحاظ می‌شود."
     )
     # Show the measured changes against the immediately preceding snapshot.
