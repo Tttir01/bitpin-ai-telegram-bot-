@@ -1,0 +1,24 @@
+name: Arbitrage risk gate tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "arbitrage-ai-mvp/**"
+      - ".github/workflows/risk-gates-tests.yml"
+  pull_request:
+    paths:
+      - "arbitrage-ai-mvp/**"
+      - ".github/workflows/risk-gates-tests.yml"
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run risk gate unit tests
+        working-directory: arbitrage-ai-mvp
+        run: python -m unittest -v test_risk_gates.py
