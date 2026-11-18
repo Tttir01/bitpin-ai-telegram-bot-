@@ -6,6 +6,7 @@ import pandas as pd
 import requests
 import streamlit as st
 from scanner import scan_markets
+from risk_gates import is_paper_candidate, profit_change_warning
 
 TEHRAN = ZoneInfo("Asia/Tehran")
 
@@ -228,11 +229,7 @@ if not df.empty:
         errors="coerce",
     ).fillna(-1) > 0
     df["profit_change_warning"] = df["profit_change_pct"].apply(
-        lambda value: (
-            "هشدار: افت سود بیش از ۳٪" if pd.notna(value) and value <= -3
-            else "بدون هشدار افت سود" if pd.notna(value)
-            else "در انتظار اسکن مقایسه‌ای"
-        )
+        profit_change_warning
     )
     df = df.sort_values(
         ["stable_3", "review_score", "profit_toman"], ascending=[False, False, False]
@@ -279,8 +276,10 @@ else:
     market_view = df[[
         "symbol", "buy_exchange", "sell_exchange", "market_stability",
         "تغییر میانگین خرید", "تغییر میانگین فروش",
-        "تغییر حجم تطبیق‌یافته", "تغییر سود خالص تخمینی", "stable_scans"
+        "تغییر حجم تطبیق‌یافته", "تغییر سود خالص تخمینی",
+        "profit_change_warning", "stable_scans"
     ]].rename(columns={
+        "profit_change_warning": "هشدار افت سود",
         "symbol": "جفت‌ارز", "buy_exchange": "صرافی خرید",
         "sell_exchange": "صرافی فروش", "market_stability": "نتیجه مقایسه اسکن",
         "stable_scans": "شمارنده پایداری",
@@ -489,15 +488,20 @@ elif not st.session_state.get("paper_trades_loaded"):
 
 paper_candidates = pd.DataFrame()
 if not df.empty:
-    paper_candidates = df[
-        (df["stable_scans"] >= 3)
-        & (df["market_stable_now"] == True)
-        & (df["validation_status"] == "قابل بررسی در شبیه‌سازی")
-        & (df["profit_toman"] > 0)
-        & (df["used_capital_toman"] <= capital)
-        & (df["profit_change_pct"].isna() | (df["profit_change_pct"] > -5))
-        & (df["stress_025_pass"] == True)
-    ].copy()
+    candidate_mask = df.apply(
+        lambda row: is_paper_candidate(
+            stable_scans=row["stable_scans"],
+            market_stable_now=row["market_stable_now"],
+            validation_status=row["validation_status"],
+            profit_toman=row["profit_toman"],
+            used_capital_toman=row["used_capital_toman"],
+            capital=capital,
+            profit_change_pct=row["profit_change_pct"],
+            stress_profit_slip_025_toman=row.get("stress_profit_slip_025_toman"),
+        ),
+        axis=1,
+    )
+    paper_candidates = df[candidate_mask].copy()
 
 if paper_candidates.empty:
     st.info("برای ثبت معامله کاغذی، ابتدا باید فرصت مثبت، پایدار در ۳ اسکن و قابل بررسی در شبیه‌سازی وجود داشته باشد.")
