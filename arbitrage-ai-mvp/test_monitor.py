@@ -48,6 +48,33 @@ class FreshnessGateTests(unittest.TestCase):
         item["market_data_status"] = "نیازمند بررسی داده/زمان"
         self.assertEqual(eligible_opportunities({"opportunities": [item]}), [])
 
+
+    def test_stability_streak_increments_within_allowed_gap(self):
+        from monitor import update_stability
+        state = {"stability": {}}
+        first = opportunity()
+        second = opportunity(buy=100.02, sell=102.02)
+        self.assertEqual(update_stability([first], state, now=1000)[route_key(first)], 1)
+        self.assertEqual(update_stability([second], state, now=1300)[route_key(second)], 2)
+
+    def test_stability_streak_resets_after_scheduler_gap(self):
+        from monitor import update_stability
+        state = {"stability": {}}
+        item = opportunity()
+        update_stability([item], state, now=1000)
+        counts = update_stability([item], state, now=1000 + 901)
+        self.assertEqual(counts[route_key(item)], 1)
+
+    def test_stability_streak_resets_when_timestamp_is_missing(self):
+        from monitor import update_stability
+        item = opportunity()
+        state = {"stability": {route_key(item): {
+            "buy_vwap": 100, "sell_vwap": 102, "quantity": 0.01,
+            "profit": 10000, "count": 4,
+        }}}
+        counts = update_stability([item], state, now=2000)
+        self.assertEqual(counts[route_key(item)], 1)
+
 class ConfirmationTests(unittest.TestCase):
     def test_margin_caps_price_change_limit_at_point_one_percent(self):
         self.assertEqual(allowed_vwap_change_pct(1.0), 0.10)
