@@ -1,0 +1,27 @@
+name: Arbitrage paper pipeline CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "arbitrage-ai-mvp/**"
+  push:
+    branches: [main]
+    paths:
+      - "arbitrage-ai-mvp/**"
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: arbitrage-ai-mvp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install worker dependencies
+        run: pip install -r requirements-worker.txt
+      - name: Run paper pipeline tests
+        run: python tests/test_pipeline.py
