@@ -28,6 +28,8 @@ MIN_STABLE_SCANS = 5
 MAX_VWAP_CHANGE_PCT = 0.10
 MAX_VOLUME_CHANGE_PCT = 25.0
 MAX_PROFIT_DROP_PCT = 30.0
+# Scheduled scans target 5 minutes; gaps above 15 minutes break the streak.
+MAX_STABILITY_GAP_SECONDS = 15 * 60
 MAX_LEDGER_ROWS = 500
 
 
@@ -176,7 +178,9 @@ def confirm_snapshots(first_rows, second_rows):
     return confirmed, rejected
 
 
-def update_stability(candidates, state):
+def update_stability(candidates, state, now=None):
+    """Count consecutive stable runs; reset after a long scheduler gap."""
+    now = time.time() if now is None else float(now)
     previous = state.get("stability", {})
     current = {}
     counts = {}
@@ -187,32 +191,37 @@ def update_stability(candidates, state):
             "sell_vwap": float(item.get("sell_vwap") or 0),
             "quantity": float(item.get("base_quantity") or 0),
             "profit": float(item.get("profit_toman") or 0),
+            "timestamp": now,
         }
         old = previous.get(key)
+        consecutive = False
         if old:
-            buy_move = _move_pct(snapshot["buy_vwap"], old.get("buy_vwap"))
-            sell_move = _move_pct(snapshot["sell_vwap"], old.get("sell_vwap"))
-            volume_move = _move_pct(snapshot["quantity"], old.get("quantity"))
-            profit_drop = (
-                max(0.0, (float(old.get("profit", 0)) - snapshot["profit"]) / float(old["profit"]) * 100)
-                if float(old.get("profit", 0)) > 0 else 999.0
-            )
-            limit = allowed_vwap_change_pct(item.get("net_spread_pct", 0))
-            stable = (
-                buy_move <= limit and sell_move <= limit
-                and volume_move <= MAX_VOLUME_CHANGE_PCT
-                and profit_drop <= MAX_PROFIT_DROP_PCT
-            )
-            count = int(old.get("count", 1)) + 1 if stable else 1
-        else:
-            count = 1
+            try:
+                elapsed = now - float(old.get("timestamp", 0))
+                buy_move = _move_pct(snapshot["buy_vwap"], old.get("buy_vwap"))
+                sell_move = _move_pct(snapshot["sell_vwap"], old.get("sell_vwap"))
+                volume_move = _move_pct(snapshot["quantity"], old.get("quantity"))
+                old_profit = float(old.get("profit", 0))
+                profit_drop = (
+                    max(0.0, (old_profit - snapshot["profit"]) / old_profit * 100)
+                    if old_profit > 0 else 999.0
+                )
+                limit = allowed_vwap_change_pct(item.get("net_spread_pct", 0))
+                consecutive = (
+                    0 < elapsed <= MAX_STABILITY_GAP_SECONDS
+                    and buy_move <= limit and sell_move <= limit
+                    and volume_move <= MAX_VOLUME_CHANGE_PCT
+                    and profit_drop <= MAX_PROFIT_DROP_PCT
+                )
+            except (TypeError, ValueError, OverflowError):
+                consecutive = False
+        count = int(old.get("count", 1)) + 1 if old and consecutive else 1
         snapshot["count"] = count
         current[key] = snapshot
         counts[key] = count
-    # Missing routes reset their consecutive streak.
+    # Missing routes and routes returning after a long gap restart at one.
     state["stability"] = current
     return counts
-
 
 def record_paper_validations(candidates, state, now):
     """Record a validated public-book snapshot, not a claim of filled execution."""
@@ -288,7 +297,7 @@ def main():
     print(f"Confirmation diagnostics: {second_result.get('diagnostics', {})}")
 
     state = load_state()
-    counts = update_stability(confirmed, state)
+    counts = update_stability(confirmed, state, now=time.time())
     stable = [row for row in confirmed if counts.get(route_key(row), 0) >= MIN_STABLE_SCANS]
     stable.sort(key=lambda row: row.get("profit_toman", 0), reverse=True)
 
