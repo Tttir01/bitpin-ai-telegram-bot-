@@ -5,23 +5,23 @@ on:
     branches: [main]
     paths:
       - "arbitrage-ai-mvp/**"
+      - ".github/workflows/arbitrage-paper-ci.yml"
   push:
     branches: [main]
     paths:
       - "arbitrage-ai-mvp/**"
+      - ".github/workflows/arbitrage-paper-ci.yml"
 
 jobs:
   tests:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: arbitrage-ai-mvp
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - name: Install worker dependencies
-        run: pip install -r requirements-worker.txt
-      - name: Run paper pipeline tests
-        run: python tests/test_pipeline.py
+          python-version: "3.12"
+      - name: Install application dependencies
+        run: pip install -r arbitrage-ai-mvp/requirements.txt
+      - name: Run paper monitor and risk-gate tests
+        working-directory: arbitrage-ai-mvp
+        run: python -m unittest -v test_risk_gates.py test_monitor.py
