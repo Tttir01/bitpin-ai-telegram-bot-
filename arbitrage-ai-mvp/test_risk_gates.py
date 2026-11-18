@@ -1,0 +1,55 @@
+import unittest
+
+from risk_gates import is_paper_candidate, profit_change_warning
+
+
+class ProfitWarningTests(unittest.TestCase):
+    def test_three_percent_drop_warns(self):
+        self.assertIn("هشدار", profit_change_warning(-3.0))
+
+    def test_four_percent_drop_warns_but_is_not_block_threshold(self):
+        self.assertIn("هشدار", profit_change_warning(-4.0))
+        self.assertTrue(candidate(profit_change_pct=-4.0))
+
+    def test_no_comparison_snapshot_has_no_warning(self):
+        self.assertIn("در انتظار", profit_change_warning(None))
+
+
+class PaperTradeGateTests(unittest.TestCase):
+    def test_exact_five_percent_drop_is_blocked(self):
+        self.assertFalse(candidate(profit_change_pct=-5.0))
+
+    def test_stress_profit_zero_or_negative_is_blocked(self):
+        self.assertFalse(candidate(stress_profit_slip_025_toman=0))
+        self.assertFalse(candidate(stress_profit_slip_025_toman=-1))
+
+    def test_all_valid_conditions_pass(self):
+        self.assertTrue(candidate())
+
+    def test_less_than_three_scans_is_blocked(self):
+        self.assertFalse(candidate(stable_scans=2))
+
+    def test_unstable_market_is_blocked(self):
+        self.assertFalse(candidate(market_stable_now=False))
+
+    def test_insufficient_capital_is_blocked(self):
+        self.assertFalse(candidate(used_capital_toman=2_000_001))
+
+
+def candidate(**overrides):
+    values = {
+        "stable_scans": 3,
+        "market_stable_now": True,
+        "validation_status": "قابل بررسی در شبیه‌سازی",
+        "profit_toman": 10_000,
+        "used_capital_toman": 1_000_000,
+        "capital": 2_000_000,
+        "profit_change_pct": 0.0,
+        "stress_profit_slip_025_toman": 100,
+    }
+    values.update(overrides)
+    return is_paper_candidate(**values)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
