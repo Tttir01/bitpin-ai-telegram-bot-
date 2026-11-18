@@ -199,6 +199,11 @@ if not df.empty:
         axis=1,
     )
     df["stable_3"] = df["stable_scans"] >= 3
+    stability_score = (df["stable_scans"].clip(lower=0, upper=5) / 5) * 100
+    df["review_score"] = (
+        return_score * 0.35 + capital_score * 0.25
+        + freshness_score * 0.25 + stability_score * 0.15
+    ).round(0).astype(int)
     market_checks = st.session_state.get("market_stability_checks", {})
     df["market_stability"] = df.apply(
         lambda row: market_checks.get(
