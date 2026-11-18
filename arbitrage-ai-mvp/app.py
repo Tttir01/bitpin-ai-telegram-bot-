@@ -78,22 +78,59 @@ if should_scan:
             st.session_state["stability_scan_number"] = 0
         st.session_state["stability_settings"] = scan_settings
 
-        # Count only opportunities that pass the user's net-return and executable-depth filters.
-        eligible_now = {
-            (item.get("symbol"), item.get("buy_exchange"), item.get("sell_exchange"))
+        # Compare consecutive snapshots for each route. A route only earns a
+        # stability count when VWAP prices and matched volume remain within limits.
+        eligible_items = {
+            (item.get("symbol"), item.get("buy_exchange"), item.get("sell_exchange")): item
             for item in result.get("opportunities", [])
             if item.get("net_spread_pct", -999) >= min_net
             and item.get("profit_toman", 0) > 0
             and item.get("used_capital_toman", 0) >= min_executable
         }
+        eligible_now = set(eligible_items)
         old_counts = st.session_state.get("stability_counts", {})
         previous_keys = st.session_state.get("previous_eligible_keys", set())
-        new_counts = {
-            key: (old_counts.get(key, 0) + 1 if key in previous_keys else 1)
-            for key in eligible_now
-        }
+        previous_snapshots = st.session_state.get("previous_market_snapshots", {})
+        new_counts = {}
+        market_checks = {}
+        current_snapshots = {}
+        for key, item in eligible_items.items():
+            route_id = "|".join(key)
+            current = {
+                "buy_vwap": float(item.get("buy_vwap") or 0),
+                "sell_vwap": float(item.get("sell_vwap") or 0),
+                "base_quantity": float(item.get("base_quantity") or 0),
+                "profit_toman": float(item.get("profit_toman") or 0),
+            }
+            prior = previous_snapshots.get(route_id)
+            if prior:
+                buy_move = abs(current["buy_vwap"] / prior["buy_vwap"] - 1) * 100 if prior.get("buy_vwap") else 999
+                sell_move = abs(current["sell_vwap"] / prior["sell_vwap"] - 1) * 100 if prior.get("sell_vwap") else 999
+                volume_move = abs(current["base_quantity"] / prior["base_quantity"] - 1) * 100 if prior.get("base_quantity") else 999
+                profit_drop = max(0.0, (prior["profit_toman"] - current["profit_toman"]) / prior["profit_toman"] * 100) if prior.get("profit_toman", 0) > 0 else 0
+                passed = buy_move <= 0.30 and sell_move <= 0.30 and volume_move <= 25.0 and profit_drop <= 30.0
+                market_checks[route_id] = {
+                    "passed": passed, "buy_move_pct": buy_move,
+                    "sell_move_pct": sell_move, "volume_move_pct": volume_move,
+                    "profit_drop_pct": profit_drop,
+                    "label": "پایدار نسبت به اسکن قبل" if passed else "ناپایدار؛ تغییر محسوس قیمت/حجم/سود",
+                }
+            else:
+                passed = False
+                market_checks[route_id] = {
+                    "passed": False, "buy_move_pct": None, "sell_move_pct": None,
+                    "volume_move_pct": None, "profit_drop_pct": None,
+                    "label": "در انتظار اسکن مقایسه‌ای",
+                }
+            if passed and key in previous_keys:
+                new_counts[key] = old_counts.get(key, 0) + 1
+            else:
+                new_counts[key] = 1
+            current_snapshots[route_id] = current
         st.session_state["stability_counts"] = new_counts
         st.session_state["previous_eligible_keys"] = eligible_now
+        st.session_state["previous_market_snapshots"] = current_snapshots
+        st.session_state["market_stability_checks"] = market_checks
         st.session_state["stability_scan_number"] = st.session_state.get("stability_scan_number", 0) + 1
         st.session_state["scan_stability"] = {
             "|".join(key): count for key, count in new_counts.items()
