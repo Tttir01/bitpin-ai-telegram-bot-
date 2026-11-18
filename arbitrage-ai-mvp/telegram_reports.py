@@ -30,9 +30,13 @@ def send_message(message):
 
 
 def send_scan_report(opportunities, stability_counts, scan_number, diagnostics, errors=None):
-    rows = sorted(opportunities, key=lambda item: item.get("profit_toman", 0), reverse=True)[:5]
+    rows = sorted(
+        opportunities,
+        key=lambda item: item.get("profit_toman", 0),
+        reverse=True,
+    )[:5]
     lines = [
-        "📊 گزارش آربیتراژ AI",
+        "📊 گزارش فرصت‌های آربیتراژ AI",
         f"اسکن شماره: {scan_number}",
         "وضعیت: فقط تحلیل و شبیه‌سازی؛ بدون سفارش واقعی",
         f"دفتر والکس: {diagnostics.get('wallex_books', '—')} | نوبیتکس: {diagnostics.get('nobitex_books', '—')}",
@@ -41,26 +45,41 @@ def send_scan_report(opportunities, stability_counts, scan_number, diagnostics, 
         "",
     ]
     if rows:
-        lines.append("بهترین فرصت‌ها:")
-        for item in rows:
+        lines.append("رتبه‌بندی بر اساس سود خالص تخمینی:")
+        for index, item in enumerate(rows, start=1):
             key = "|".join((
                 str(item.get("symbol", "")),
                 str(item.get("buy_exchange", "")),
                 str(item.get("sell_exchange", "")),
             ))
             stable = stability_counts.get(key, 0)
-            lines.append(
-                f"• {item.get('symbol', '—')}: خرید {item.get('buy_exchange', '—')}، "
-                f"فروش {item.get('sell_exchange', '—')} | "
-                f"سود تخمینی {item.get('profit_toman', 0):,.0f} تومان "
-                f"({item.get('net_spread_pct', 0):.2f}٪) | پایداری {stable} اسکن"
-            )
+            lines.extend([
+                "",
+                f"{index}) {item.get('symbol', '—')}",
+                f"مسیر: خرید از {item.get('buy_exchange', '—')} ← فروش در {item.get('sell_exchange', '—')}",
+                f"قیمت میانگین خرید: {item.get('buy_vwap', item.get('buy_ask', 0)):,.8g} تومان",
+                f"قیمت میانگین فروش: {item.get('sell_vwap', item.get('sell_bid', 0)):,.8g} تومان",
+                f"اختلاف قیمت اولیه: {item.get('spread_pct', 0):.3f}٪",
+                f"سرمایه درگیر: {item.get('used_capital_toman', 0):,.0f} تومان",
+                f"سود ناخالص: {item.get('gross_profit_toman', 0):,.0f} تومان",
+                f"کارمزد خرید/فروش: {item.get('buy_fee_toman', 0):,.0f} / {item.get('sell_fee_toman', 0):,.0f} تومان",
+                f"لغزش خرید/فروش: {item.get('buy_slippage_toman', 0):,.0f} / {item.get('sell_slippage_toman', 0):,.0f} تومان",
+                f"انتقال و سایر هزینه‌ها: {item.get('transfer_cost_toman', 0):,.0f} تومان",
+                f"کل هزینه‌ها: {item.get('total_costs_toman', 0):,.0f} تومان",
+                f"سود خالص تخمینی: {item.get('profit_toman', 0):,.0f} تومان ({item.get('net_spread_pct', 0):.3f}٪)",
+                f"پایداری: {stable} اسکن | پوشش حجم: {item.get('depth_coverage_pct', '—')}٪",
+                f"اعتبارسنجی: {item.get('validation_status', '—')}",
+            ])
     else:
         lines.append("در این اسکن فرصت واجد شرایطی پیدا نشد.")
     if errors:
         lines.extend(["", "خطاهای دریافت داده:"])
         lines.extend(f"• {str(error)[:180]}" for error in errors[:2])
-    lines.extend(["", "⚠️ سودها فرضی‌اند؛ موجودی، انتقال و اجرای واقعی تأیید نشده‌اند."])
+    lines.extend([
+        "",
+        "⚠️ همه ارقام برآوردی‌اند؛ موجودی حساب، انتقال شبکه و اجرای واقعی تأیید نشده‌اند.",
+        "این پیام توصیه خرید/فروش نیست و هیچ سفارش یا انتقالی انجام نشده است.",
+    ])
     return send_message("\n".join(lines))
 
 
