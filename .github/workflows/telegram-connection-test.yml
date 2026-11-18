@@ -1,0 +1,51 @@
+name: Telegram Connection Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  send-test-message:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Send a harmless test message
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+          chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+          if not token or not chat_id:
+              raise SystemExit("Missing Telegram GitHub Actions secrets.")
+
+          url = f"https://api.telegram.org/bot{token}/sendMessage"
+          body = json.dumps({
+              "chat_id": chat_id,
+              "text": "🧪 تست اتصال Arbitrage AI\nاین پیام فقط برای بررسی دسترسی ربات به کانال است. هیچ سفارش یا معامله‌ای انجام نشده است."
+          }).encode("utf-8")
+          request = urllib.request.Request(
+              url, data=body, headers={"Content-Type": "application/json"}, method="POST"
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  result = json.loads(response.read().decode("utf-8"))
+          except urllib.error.HTTPError as error:
+              # Do not print request URL: it contains the bot token.
+              raise SystemExit(f"Telegram API returned HTTP {error.code}. Check bot membership, admin rights, and chat ID.") from None
+          except Exception as error:
+              raise SystemExit(f"Telegram connection failed: {type(error).__name__}") from None
+
+          if not result.get("ok"):
+              raise SystemExit("Telegram API did not accept the test message.")
+          print("SUCCESS: Telegram API accepted the test message.")
+          print(f"Message ID: {result['result'].get('message_id', 'unknown')}")
+          PY
