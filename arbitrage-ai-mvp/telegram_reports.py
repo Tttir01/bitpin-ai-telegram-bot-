@@ -68,7 +68,11 @@ def send_scan_report(opportunities, stability_counts, scan_number, diagnostics, 
                 f"کل هزینه‌ها: {item.get('total_costs_toman', 0):,.0f} تومان",
                 f"سود خالص تخمینی: {item.get('profit_toman', 0):,.0f} تومان ({item.get('net_spread_pct', 0):.3f}٪)",
                 f"پایداری: {stable} اسکن | پوشش حجم: {item.get('depth_coverage_pct', '—')}٪",
-                f"اعتبارسنجی: {item.get('validation_status', '—')}",
+                f"اعتبارسنجی بازار: {item.get('validation_status', '—')}",
+                f"هویت دارایی: {item.get('asset_identity_status', 'تأییدنشده')}",
+                f"شبکه انتقال: {item.get('network_status', 'نامشخص')}",
+                f"واریز/برداشت: {item.get('deposit_withdraw_status', 'نامشخص')}",
+                "آمادگی اجرای واقعی: خیر",
             ])
     else:
         lines.append("در این اسکن فرصت واجد شرایطی پیدا نشد.")
@@ -77,7 +81,7 @@ def send_scan_report(opportunities, stability_counts, scan_number, diagnostics, 
         lines.extend(f"• {str(error)[:180]}" for error in errors[:2])
     lines.extend([
         "",
-        "⚠️ همه ارقام برآوردی‌اند؛ موجودی حساب، انتقال شبکه و اجرای واقعی تأیید نشده‌اند.",
+        "⚠️ همه ارقام برآوردی‌اند؛ هویت دارایی، شبکه، واریز/برداشت و موجودی حساب تأیید نشده‌اند.",
         "این پیام توصیه خرید/فروش نیست و هیچ سفارش یا انتقالی انجام نشده است.",
     ])
     return send_message("\n".join(lines))
