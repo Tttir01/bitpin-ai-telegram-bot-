@@ -84,12 +84,16 @@ def reprice_entry(entry, wallex_books, nobitex_books):
     fixed_fee = _num(fixed_fee) if fixed_fee is not None else None
     capital = _num(entry.get("capital_toman"))
 
-    sell_depth = sum(_num(level[1]) for level in bids)
-    max_buy_qty = sell_depth + (fixed_fee or 0.0)
+    # Re-price the originally recorded quantity, not a smaller newly optimized trade.
+    target_buy_qty = _num(entry.get("initial_base_quantity"))
+    if target_buy_qty <= 0:
+        return {"status": "invalid_recorded_quantity"}
     buy_budget = capital / (1.0 + transfer_pct)
     bought_qty, raw_buy_cost = buy_from_asks(
-        asks, buy_budget, max_buy_qty, buy_fee, slippage
+        asks, buy_budget, target_buy_qty, buy_fee, slippage
     )
+    if bought_qty + max(1e-12, target_buy_qty * 1e-8) < target_buy_qty:
+        return {"status": "insufficient_buy_depth"}
     if bought_qty <= 0:
         return {"status": "insufficient_buy_depth"}
 
