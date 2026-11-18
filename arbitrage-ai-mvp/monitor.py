@@ -1,3 +1,8 @@
+"""Independent scheduled market monitor with delayed order-book confirmation.
+
+This process is separate from Streamlit. It only reads public order books,
+records paper validations, and sends Telegram alerts; it never places orders.
+"""
 import json
 import os
 import time
@@ -16,27 +21,35 @@ FEE_NOBITEX = float(os.getenv("FEE_NOBITEX", "0.25")) / 100
 SLIPPAGE_PCT = float(os.getenv("SLIPPAGE_PCT", "0.20"))
 TRANSFER_COST_PCT = float(os.getenv("TRANSFER_COST_PCT", "0.30"))
 COOLDOWN_MINUTES = int(os.getenv("ALERT_COOLDOWN_MINUTES", "60"))
-STATE_FILE = Path(os.getenv("ALERT_STATE_FILE", "/tmp/arbitrage_alert_state.json"))
+PAPER_COOLDOWN_MINUTES = int(os.getenv("PAPER_VALIDATION_COOLDOWN_MINUTES", "30"))
+CONFIRM_DELAY_SECONDS = float(os.getenv("CONFIRM_DELAY_SECONDS", "5"))
+STATE_FILE = Path(os.getenv("ALERT_STATE_FILE", ".cache/arbitrage_state.json"))
 MIN_STABLE_SCANS = 5
-MAX_VWAP_CHANGE_PCT = 0.30
+MAX_VWAP_CHANGE_PCT = 0.10
 MAX_VOLUME_CHANGE_PCT = 25.0
 MAX_PROFIT_DROP_PCT = 30.0
+MAX_LEDGER_ROWS = 500
 
 
 def load_state():
     try:
         raw = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        if isinstance(raw, dict) and "stability" in raw and "alerts" in raw:
+        if isinstance(raw, dict):
+            raw.setdefault("alerts", {})
+            raw.setdefault("stability", {})
+            raw.setdefault("paper_validations", [])
             return raw
     except (OSError, ValueError):
         pass
-    return {"alerts": {}, "stability": {}}
+    return {"alerts": {}, "stability": {}, "paper_validations": []}
 
 
 def save_state(state):
     try:
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        STATE_FILE.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+        temporary = STATE_FILE.with_suffix(STATE_FILE.suffix + ".tmp")
+        temporary.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+        temporary.replace(STATE_FILE)
     except OSError as error:
         print(f"State persistence warning: {error}")
 
@@ -60,7 +73,88 @@ def send_telegram(message):
 
 
 def route_key(item):
-    return "|".join((str(item.get("symbol", "")), str(item.get("buy_exchange", "")), str(item.get("sell_exchange", ""))))
+    return "|".join((
+        str(item.get("symbol", "")),
+        str(item.get("buy_exchange", "")),
+        str(item.get("sell_exchange", "")),
+    ))
+
+
+def eligible_opportunities(result):
+    rows = []
+    for item in result.get("opportunities", []):
+        try:
+            net_pct = float(item.get("net_spread_pct", -999))
+            profit = float(item.get("profit_toman", 0))
+            used = float(item.get("used_capital_toman", 0))
+        except (TypeError, ValueError):
+            continue
+        if net_pct >= MIN_NET_PROFIT_PCT and profit > 0 and 0 < used <= CAPITAL_TOMAN:
+            rows.append(item)
+    return rows
+
+
+def _move_pct(current, previous):
+    try:
+        current, previous = float(current), float(previous)
+        if previous <= 0:
+            return 999.0
+        return abs(current / previous - 1) * 100
+    except (TypeError, ValueError):
+        return 999.0
+
+
+def allowed_vwap_change_pct(net_spread_pct):
+    """Use the tighter of 0.10% or half the route's net return."""
+    try:
+        margin = max(0.0, float(net_spread_pct))
+    except (TypeError, ValueError):
+        return 0.0
+    return min(MAX_VWAP_CHANGE_PCT, margin / 2.0)
+
+
+def confirm_snapshots(first_rows, second_rows):
+    """Keep only routes still profitable and price-stable in the fresh scan."""
+    second_by_key = {route_key(row): row for row in second_rows}
+    confirmed = []
+    rejected = []
+    for first in first_rows:
+        key = route_key(first)
+        second = second_by_key.get(key)
+        if second is None:
+            rejected.append({"route": key, "reason": "route_missing_on_confirmation"})
+            continue
+        buy_move = _move_pct(second.get("buy_vwap"), first.get("buy_vwap"))
+        sell_move = _move_pct(second.get("sell_vwap"), first.get("sell_vwap"))
+        limit = allowed_vwap_change_pct(first.get("net_spread_pct", 0))
+        try:
+            second_profit = float(second.get("profit_toman", 0))
+            second_net = float(second.get("net_spread_pct", -999))
+        except (TypeError, ValueError):
+            second_profit, second_net = 0.0, -999.0
+        passed = (
+            buy_move <= limit
+            and sell_move <= limit
+            and second_profit > 0
+            and second_net >= MIN_NET_PROFIT_PCT
+        )
+        if passed:
+            item = dict(second)
+            item["confirmation_buy_move_pct"] = round(buy_move, 6)
+            item["confirmation_sell_move_pct"] = round(sell_move, 6)
+            item["confirmation_limit_pct"] = round(limit, 6)
+            item["first_scan_profit_toman"] = first.get("profit_toman", 0)
+            confirmed.append(item)
+        else:
+            rejected.append({
+                "route": key,
+                "reason": "price_moved_or_profit_disappeared",
+                "buy_move_pct": round(buy_move, 6),
+                "sell_move_pct": round(sell_move, 6),
+                "allowed_move_pct": round(limit, 6),
+                "second_profit_toman": second_profit,
+            })
+    return confirmed, rejected
 
 
 def update_stability(candidates, state):
@@ -70,25 +164,23 @@ def update_stability(candidates, state):
     for item in candidates:
         key = route_key(item)
         snapshot = {
-            "buy_vwap": float(item.get("buy_vwap") or item.get("buy_ask") or 0),
-            "sell_vwap": float(item.get("sell_vwap") or item.get("sell_bid") or 0),
+            "buy_vwap": float(item.get("buy_vwap") or 0),
+            "sell_vwap": float(item.get("sell_vwap") or 0),
             "quantity": float(item.get("base_quantity") or 0),
             "profit": float(item.get("profit_toman") or 0),
         }
         old = previous.get(key)
         if old:
-            def move(now_value, old_value):
-                return abs(now_value / old_value - 1) * 100 if old_value else 999
-            buy_move = move(snapshot["buy_vwap"], float(old.get("buy_vwap", 0)))
-            sell_move = move(snapshot["sell_vwap"], float(old.get("sell_vwap", 0)))
-            volume_move = move(snapshot["quantity"], float(old.get("quantity", 0)))
+            buy_move = _move_pct(snapshot["buy_vwap"], old.get("buy_vwap"))
+            sell_move = _move_pct(snapshot["sell_vwap"], old.get("sell_vwap"))
+            volume_move = _move_pct(snapshot["quantity"], old.get("quantity"))
             profit_drop = (
                 max(0.0, (float(old.get("profit", 0)) - snapshot["profit"]) / float(old["profit"]) * 100)
-                if float(old.get("profit", 0)) > 0 else 0.0
+                if float(old.get("profit", 0)) > 0 else 999.0
             )
+            limit = allowed_vwap_change_pct(item.get("net_spread_pct", 0))
             stable = (
-                buy_move <= MAX_VWAP_CHANGE_PCT
-                and sell_move <= MAX_VWAP_CHANGE_PCT
+                buy_move <= limit and sell_move <= limit
                 and volume_move <= MAX_VOLUME_CHANGE_PCT
                 and profit_drop <= MAX_PROFIT_DROP_PCT
             )
@@ -98,86 +190,108 @@ def update_stability(candidates, state):
         snapshot["count"] = count
         current[key] = snapshot
         counts[key] = count
-    # A route missing from this scan loses its consecutive-stability streak.
+    # Missing routes reset their consecutive streak.
     state["stability"] = current
     return counts
+
+
+def record_paper_validations(candidates, state, now):
+    """Record a validated public-book snapshot, not a claim of filled execution."""
+    ledger = state.setdefault("paper_validations", [])
+    last_by_key = {}
+    for row in ledger:
+        last_by_key[row.get("route", "")] = max(
+            float(row.get("timestamp", 0) or 0),
+            last_by_key.get(row.get("route", ""), 0),
+        )
+    added = []
+    for item in candidates:
+        key = route_key(item)
+        if now - last_by_key.get(key, 0) < PAPER_COOLDOWN_MINUTES * 60:
+            continue
+        row = {
+            "route": key,
+            "timestamp": now,
+            "time_tehran": datetime.fromtimestamp(now, TEHRAN).isoformat(),
+            "capital_toman": round(float(item.get("used_capital_toman", 0))),
+            "estimated_net_profit_toman": round(float(item.get("profit_toman", 0))),
+            "estimated_net_return_pct": float(item.get("net_spread_pct", 0)),
+            "buy_vwap": item.get("buy_vwap"),
+            "sell_vwap": item.get("sell_vwap"),
+            "confirmation_buy_move_pct": item.get("confirmation_buy_move_pct"),
+            "confirmation_sell_move_pct": item.get("confirmation_sell_move_pct"),
+            "status": "confirmed_public_orderbook_only",
+            "real_order_placed": False,
+        }
+        ledger.append(row)
+        added.append(row)
+    state["paper_validations"] = ledger[-MAX_LEDGER_ROWS:]
+    return added
 
 
 def format_opportunity(index, item, stable_count):
     return (
         f"{index}) {item.get('symbol', '—')} | خرید {item.get('buy_exchange', '—')} / فروش {item.get('sell_exchange', '—')}\n"
-        f"میانگین خرید/فروش: {item.get('buy_vwap', item.get('buy_ask', 0)):,.8g} / "
-        f"{item.get('sell_vwap', item.get('sell_bid', 0)):,.8g}\n"
-        f"سرمایه: {item.get('used_capital_toman', 0):,.0f} تومان | "
-        f"سود خالص تخمینی: {item.get('profit_toman', 0):,.0f} تومان "
+        f"میانگین خرید/فروش: {item.get('buy_vwap', 0):,.8g} / {item.get('sell_vwap', 0):,.8g}\n"
+        f"سرمایه: {item.get('used_capital_toman', 0):,.0f} تومان | سود خالص تخمینی: {item.get('profit_toman', 0):,.0f} تومان "
         f"({item.get('net_spread_pct', 0):.3f}٪)\n"
-        f"پایداری: {stable_count}/{MIN_STABLE_SCANS} اسکن | "
-        f"پوشش عمق: {item.get('depth_coverage_pct', '—')}٪\n"
-        f"هویت دارایی: {item.get('asset_identity_status', 'تأییدنشده')}\n"
-        f"شبکه: {item.get('network_status', 'نامشخص')}\n"
-        f"واریز/برداشت: {item.get('deposit_withdraw_status', 'نامشخص')}\n"
-        "آمادگی اجرای واقعی: خیر"
+        f"تأیید اسکن دوم: تغییر خرید {item.get('confirmation_buy_move_pct', 0):.4f}٪، "
+        f"تغییر فروش {item.get('confirmation_sell_move_pct', 0):.4f}٪\n"
+        f"پایداری بین اجراهای مستقل: {stable_count}/{MIN_STABLE_SCANS} اسکن\n"
+        "فقط شبیه‌سازی؛ معامله واقعی انجام نشده است."
     )
 
 
 def main():
-    print("Starting scheduled Wallex/Nobitex market scan (simulation only)...")
-    result = scan_markets(
-        fee_local=FEE_WALLEX,
-        fee_global=FEE_NOBITEX,
-        slippage_pct=SLIPPAGE_PCT,
-        transfer_cost_pct=TRANSFER_COST_PCT,
+    print("Independent scheduled Wallex/Nobitex monitor (paper-only).")
+    first_result = scan_markets(
+        fee_local=FEE_WALLEX, fee_global=FEE_NOBITEX,
+        slippage_pct=SLIPPAGE_PCT, transfer_cost_pct=TRANSFER_COST_PCT,
         capital_toman=CAPITAL_TOMAN,
     )
-    diagnostics = result.get("diagnostics", {})
-    print(
-        f"Books: Wallex={diagnostics.get('wallex_books', 0)}, "
-        f"Nobitex={diagnostics.get('nobitex_books', 0)}, "
-        f"common={diagnostics.get('common_symbols', 0)}"
-    )
-    for error in result.get("errors", []):
-        print(f"Market data error: {error}")
+    for error in first_result.get("errors", []):
+        print(f"First scan error: {error}")
+    first_rows = eligible_opportunities(first_result)
+    print(f"First scan eligible routes: {len(first_rows)}")
 
-    candidates = [
-        item for item in result.get("opportunities", [])
-        if item.get("net_spread_pct", -999) >= MIN_NET_PROFIT_PCT
-        and item.get("profit_toman", 0) > 0
-        and item.get("used_capital_toman", 0) >= min(100000, CAPITAL_TOMAN)
-    ]
-    candidates.sort(key=lambda item: item.get("profit_toman", 0), reverse=True)
+    if CONFIRM_DELAY_SECONDS > 0:
+        time.sleep(CONFIRM_DELAY_SECONDS)
+    second_result = scan_markets(
+        fee_local=FEE_WALLEX, fee_global=FEE_NOBITEX,
+        slippage_pct=SLIPPAGE_PCT, transfer_cost_pct=TRANSFER_COST_PCT,
+        capital_toman=CAPITAL_TOMAN,
+    )
+    for error in second_result.get("errors", []):
+        print(f"Confirmation scan error: {error}")
+    second_rows = eligible_opportunities(second_result)
+    confirmed, rejected = confirm_snapshots(first_rows, second_rows)
+    print(f"Confirmed={len(confirmed)}; rejected={len(rejected)}")
+    print(f"Confirmation diagnostics: {second_result.get('diagnostics', {})}")
 
     state = load_state()
-    stability_counts = update_stability(candidates, state)
-    stable_candidates = [
-        item for item in candidates
-        if stability_counts.get(route_key(item), 0) >= MIN_STABLE_SCANS
-    ]
-    stable_candidates.sort(key=lambda item: item.get("profit_toman", 0), reverse=True)
-    print(
-        f"Eligible={len(candidates)}; stable for {MIN_STABLE_SCANS} scans="
-        f"{len(stable_candidates)}"
-    )
+    counts = update_stability(confirmed, state)
+    stable = [row for row in confirmed if counts.get(route_key(row), 0) >= MIN_STABLE_SCANS]
+    stable.sort(key=lambda row: row.get("profit_toman", 0), reverse=True)
 
     now = time.time()
+    new_validations = record_paper_validations(confirmed, state, now)
     alerts = state.setdefault("alerts", {})
-    messages_sent = 0
-    for item in stable_candidates[:5]:
+    sent = 0
+    for item in stable[:5]:
         key = route_key(item)
-        last_sent = float(alerts.get(key, 0) or 0)
-        if now - last_sent < COOLDOWN_MINUTES * 60:
+        if now - float(alerts.get(key, 0) or 0) < COOLDOWN_MINUTES * 60:
             continue
         message = (
             "🔔 فرصت پایدار آربیتراژ برای بررسی\n"
             f"زمان: {datetime.now(TEHRAN).strftime('%Y-%m-%d %H:%M:%S')}\n"
-            "حالت: فقط تحلیل و شبیه‌سازی؛ بدون معامله واقعی\n\n"
-            + format_opportunity(1, item, stability_counts.get(key, 0))
-            + "\n\n⚠️ همه ارقام تخمینی‌اند؛ موجودی، هویت دارایی، شبکه و وضعیت واریز/برداشت تأیید نشده‌اند. "
-            "این پیام توصیه خرید/فروش نیست."
+            "حالت: فقط تحلیل و شبیه‌سازی؛ بدون سفارش واقعی\n\n"
+            + format_opportunity(1, item, counts.get(key, 0))
+            + "\n\n⚠️ این تأیید فقط بر اساس دو snapshot عمومی دفتر سفارش است؛ موجودی، شبکه، انتقال و اجرای واقعی تأیید نشده‌اند."
         )
         try:
             if send_telegram(message):
                 alerts[key] = now
-                messages_sent += 1
+                sent += 1
         except (requests.RequestException, RuntimeError) as error:
             print(f"Telegram delivery failed: {type(error).__name__}: {error}")
             break
@@ -185,31 +299,34 @@ def main():
     today = datetime.now(TEHRAN).strftime("%Y-%m-%d")
     digest_key = f"daily_digest_{today}"
     if digest_key not in alerts:
+        diagnostics = second_result.get("diagnostics", {})
         lines = [
             f"📊 گزارش روزانه پایش آربیتراژ | {today}",
             f"سرمایه شبیه‌سازی: {CAPITAL_TOMAN:,.0f} تومان",
             f"دفتر والکس: {diagnostics.get('wallex_books', '—')} | نوبیتکس: {diagnostics.get('nobitex_books', '—')}",
-            f"جفت‌ارز مشترک: {diagnostics.get('common_symbols', '—')}",
-            f"فرصت‌های واجد شرایط: {len(candidates)} | پایدار در ۵ اسکن: {len(stable_candidates)}",
+            f"فرصت‌های تأییدشده با اسکن دوم: {len(confirmed)}",
+            f"پایدار در ۵ اجرای مستقل: {len(stable)}",
+            f"اعتبارسنجی‌های کاغذی جدید: {len(new_validations)}",
             "فقط تحلیل و شبیه‌سازی؛ بدون سفارش واقعی",
-            "",
         ]
-        if stable_candidates:
-            lines.append("بهترین فرصت‌های پایدار:")
-            for index, item in enumerate(stable_candidates[:5], 1):
-                lines.append(format_opportunity(index, item, stability_counts.get(route_key(item), 0)))
-                lines.append("")
-        else:
-            lines.append("هنوز فرصتی در ۵ اسکن متوالی پایدار نمانده است.")
-        lines.append("⚠️ انتقال، شبکه، موجودی و امکان اجرای واقعی تأیید نشده‌اند.")
         try:
             if send_telegram("\n".join(lines)):
                 alerts[digest_key] = now
         except (requests.RequestException, RuntimeError) as error:
-            print(f"Daily Telegram digest failed: {type(error).__name__}: {error}")
+            print(f"Daily digest failed: {type(error).__name__}: {error}")
 
+    state["last_run"] = {
+        "timestamp": now,
+        "first_eligible": len(first_rows),
+        "confirmed": len(confirmed),
+        "rejected": len(rejected),
+        "stable": len(stable),
+    }
     save_state(state)
-    print(f"Completed. Telegram alerts sent: {messages_sent}; stable candidates: {len(stable_candidates)}")
+    print(
+        f"Completed: confirmed={len(confirmed)}, stable={len(stable)}, "
+        f"paper validations added={len(new_validations)}, Telegram alerts={sent}"
+    )
 
 
 if __name__ == "__main__":
