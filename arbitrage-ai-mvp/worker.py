@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from db import Supabase
 from risk_gates import is_paper_candidate
-from scanner import scan_markets
+from scanner import fetch_both_books, scan_markets
 from stability import make_route_id, update_stability
 from validation import build_entry, process_pending
 
@@ -112,7 +112,9 @@ def run_cycle(db, config, state, run_id, now=None, books=None):
     state.setdefault("last_validation", {})
     state.setdefault("settings", settings_signature(config))
 
-    # All public-book acquisition is delegated to scanner; supplied snapshots make tests deterministic.
+    # Fetch one synchronized snapshot and reuse it for scan and delayed re-pricing.
+    if books is None:
+        books = fetch_both_books()
     result = scan_markets(
         fee_local=config["fee_local"],
         fee_global=config["fee_global"],
@@ -126,11 +128,7 @@ def run_cycle(db, config, state, run_id, now=None, books=None):
         now=now,
     )
 
-    wallex, nobitex, book_errors = books if books is not None else ({}, {}, [])
-    if books is None:
-        # scanner already fetched internally; fetch references are not exposed by the old interface.
-        # The worker requires scanner's explicit snapshot return in the upgraded version.
-        book_errors = result.get("errors", [])
+    wallex, nobitex, book_errors = books
     errors = list(result.get("errors", [])) + [e for e in book_errors if e not in result.get("errors", [])]
     no_snapshot = books is not None and not wallex and not nobitex
     scan_ok = not errors and not no_snapshot
@@ -141,8 +139,7 @@ def run_cycle(db, config, state, run_id, now=None, books=None):
         _save_state(db, state, now)
         return result
 
-    if books is not None:
-        _settle_pending(db, config, wallex, nobitex, now)
+    _settle_pending(db, config, wallex, nobitex, now)
 
     eligible, routes, checks = update_stability(
         result.get("opportunities", []),
@@ -174,7 +171,6 @@ def run_cycle(db, config, state, run_id, now=None, books=None):
         entry = build_entry(item, config)
         db.insert("arb_validations", [{
             "route_id": route_id,
-            "created_at": datetime.fromtimestamp(now, timezone.utc).isoformat(),
             "entry": entry,
             "initial_opportunity": item,
             "results": {},
