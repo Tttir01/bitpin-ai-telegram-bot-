@@ -31,7 +31,7 @@ Fee variables ending in `_PCT` are percentages; the worker converts them to deci
 
 ## Supabase setup
 
-Run `supabase/migrations/20261118_worker_pipeline.sql` in the Supabase SQL Editor. The worker uses the service role key. The dashboard should use only the anon key and read-only access. The `arb_state` table has no anon/authenticated read policy.
+Run `supabase/sql/worker_pipeline.sql` in the Supabase SQL Editor. The worker uses the service role key. The dashboard should use only the anon key and read-only access. The `arb_state` table has no anon/authenticated read policy.
 
 ## Run locally
 
