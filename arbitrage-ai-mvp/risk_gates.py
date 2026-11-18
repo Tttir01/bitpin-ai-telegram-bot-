@@ -49,9 +49,9 @@ def is_paper_candidate(
 
     return bool(
         stable is not None
-        and stable >= 3
+        and stable >= 5
         and market_stable_now is True
-        and validation_status == "قابل بررسی در شبیه‌سازی"
+        and validation_status == "فقط شبیه‌سازی؛ انتقال/شبکه تأییدنشده"
         and profit is not None
         and profit > 0
         and used_capital is not None
