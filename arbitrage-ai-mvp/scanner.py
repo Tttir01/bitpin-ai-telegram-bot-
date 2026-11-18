@@ -261,6 +261,22 @@ def scan_markets(
                 used_capital = buy_debit + transfer_cost
                 net_pct = (net_profit / used_capital * 100) if used_capital else -100
 
+                # Stress-test additional slippage on BOTH legs, beyond the configured base slippage.
+                stress_profits = {}
+                for extra_slippage_pct in (0.10, 0.25, 0.50):
+                    stressed_slippage = slippage + (extra_slippage_pct / 100)
+                    stressed_buy_debit = raw_buy_cost * (1 + buy_fee) * (1 + stressed_slippage)
+                    stressed_sell_net = raw_sell_value * (1 - sell_fee) * (1 - stressed_slippage)
+                    stress_profits[extra_slippage_pct] = stressed_sell_net - stressed_buy_debit - transfer_cost
+                stress_denominator = (
+                    raw_buy_cost * (1 + buy_fee)
+                    + raw_sell_value * (1 - sell_fee)
+                )
+                max_extra_slippage_pct = (
+                    max(0.0, net_profit / stress_denominator * 100)
+                    if stress_denominator > 0 else 0.0
+                )
+
                 # Exact cost breakdown using the same fee/slippage sequence as the simulation.
                 buy_fee_cost = raw_buy_cost * buy_fee
                 buy_slippage_cost = raw_buy_cost * (1 + buy_fee) * slippage
@@ -304,6 +320,10 @@ def scan_markets(
                     "net_spread_pct": round(net_pct, 4),
                     "estimated_cost_pct": round((1 - net_profit / raw_buy_cost) * 100, 4),
                     "profit_toman": round(net_profit),
+                    "stress_profit_slip_010_toman": round(stress_profits[0.10]),
+                    "stress_profit_slip_025_toman": round(stress_profits[0.25]),
+                    "stress_profit_slip_050_toman": round(stress_profits[0.50]),
+                    "max_extra_slippage_pct": round(max_extra_slippage_pct, 4),
                     "used_capital_toman": round(used_capital),
                     "unused_capital_toman": round(max(0, capital_toman - used_capital)),
                     "base_quantity": bought_qty,
