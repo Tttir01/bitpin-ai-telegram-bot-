@@ -1,7 +1,7 @@
 import unittest
 
 from risk_gates import (
-    is_paper_candidate, profit_change_warning,
+    is_paper_candidate, profit_change_warning, allowed_vwap_change_pct,
     MAX_VWAP_CHANGE_PCT, MAX_MATCHED_VOLUME_CHANGE_PCT,
     MAX_STABILITY_PROFIT_DROP_PCT, PROFIT_DROP_WARNING_PCT,
     PAPER_BLOCK_PROFIT_DROP_PCT,
@@ -10,11 +10,17 @@ from risk_gates import (
 
 class RiskThresholdConfigurationTests(unittest.TestCase):
     def test_thresholds_are_explicit_and_distinct(self):
-        self.assertEqual(MAX_VWAP_CHANGE_PCT, 0.30)
+        self.assertEqual(MAX_VWAP_CHANGE_PCT, 0.10)
         self.assertEqual(MAX_MATCHED_VOLUME_CHANGE_PCT, 25.0)
         self.assertEqual(MAX_STABILITY_PROFIT_DROP_PCT, 30.0)
         self.assertEqual(PROFIT_DROP_WARNING_PCT, 3.0)
         self.assertEqual(PAPER_BLOCK_PROFIT_DROP_PCT, 5.0)
+
+    def test_thin_margin_uses_half_net_return(self):
+        self.assertEqual(allowed_vwap_change_pct(0.08), 0.04)
+
+    def test_normal_margin_is_capped_at_point_one_percent(self):
+        self.assertEqual(allowed_vwap_change_pct(1.0), 0.10)
 
 
 class ProfitWarningTests(unittest.TestCase):
