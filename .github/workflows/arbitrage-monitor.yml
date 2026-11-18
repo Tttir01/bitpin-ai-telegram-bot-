@@ -47,7 +47,7 @@ jobs:
           ALERT_STATE_FILE: ".cache/arbitrage_state.json"
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python arbitrage-ai-mvp/monitor.py
+        run: python arbitrage-ai-mvp/monitor_entrypoint.py
 
       - name: Persist stability and paper-validation state
         if: always()

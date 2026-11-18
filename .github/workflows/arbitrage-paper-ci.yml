@@ -24,4 +24,4 @@ jobs:
         run: pip install -r arbitrage-ai-mvp/requirements.txt
       - name: Run paper monitor and risk-gate tests
         working-directory: arbitrage-ai-mvp
-        run: python -m unittest -v test_risk_gates.py test_monitor.py
+        run: python -m unittest -v test_risk_gates.py test_monitor.py test_monitor_entrypoint.py
