@@ -159,7 +159,7 @@ if should_scan:
         history.append({
             "time": datetime.now(TEHRAN),
             "opportunities": len(eligible_now),
-            "stable_opportunities": sum(1 for count in new_counts.values() if count >= 3),
+            "stable_opportunities": sum(1 for count in new_counts.values() if count >= 5),
             "best_profit": max(
                 [x.get("profit_toman", 0) for x in result.get("opportunities", [])
                  if (x.get("symbol"), x.get("buy_exchange"), x.get("sell_exchange")) in eligible_now] or [0]
@@ -220,7 +220,7 @@ if not df.empty:
         lambda row: stability.get("|".join((str(row["symbol"]), str(row["buy_exchange"]), str(row["sell_exchange"]))), 0),
         axis=1,
     )
-    df["stable_3"] = df["stable_scans"] >= 3
+    df["stable_5"] = df["stable_scans"] >= 5
     stability_score = (df["stable_scans"].clip(lower=0, upper=5) / 5) * 100
     df["review_score"] = (
         return_score * 0.35 + capital_score * 0.25
@@ -253,7 +253,7 @@ if not df.empty:
         profit_change_warning
     )
     df = df.sort_values(
-        ["stable_3", "review_score", "profit_toman"], ascending=[False, False, False]
+        ["stable_5", "review_score", "profit_toman"], ascending=[False, False, False]
     )
 
 if df.empty:
@@ -270,7 +270,7 @@ else:
     z.metric("بازده خالص", f"{best['net_spread_pct']:.2f}%")
     w.metric("امتیاز بررسی", f"{int(best['review_score'])}/100")
 
-    stable_df = df[df["stable_3"]]
+    stable_df = df[df["stable_5"]]
     st.subheader("کنترل تغییر قیمت و حجم بین دو اسکن")
     st.caption(
         f"مقایسه با اسکن قبلی همان مسیر: تغییر میانگین قیمت خرید یا فروش حداکثر {MAX_VWAP_CHANGE_PCT:.2f}٪، "
@@ -330,10 +330,10 @@ else:
     )
     st.subheader("تشخیص فرصت پایدار")
     s1, s2 = st.columns(2)
-    s1.metric("تعداد فرصت‌های پایدار (۳ اسکن)", len(stable_df))
+    s1.metric("تعداد فرصت‌های پایدار (۵ اسکن)", len(stable_df))
     s2.metric("تعداد اسکن انجام‌شده", st.session_state.get("stability_scan_number", 0))
     if not stable_df.empty:
-        st.success("فرصت‌های زیر در ۳ اسکن متوالی واجد شرایط باقی مانده‌اند؛ این فقط پایداری داده و قیمت است، نه تضمین اجرا یا سود.")
+        st.success("فرصت‌های زیر در ۵ اسکن متوالی واجد شرایط باقی مانده‌اند؛ این فقط پایداری داده و قیمت است، نه تضمین اجرا یا سود.")
         stable_view = stable_df[["symbol", "buy_exchange", "sell_exchange", "net_spread_pct", "profit_toman", "stable_scans"]].rename(columns={
             "symbol": "جفت‌ارز", "buy_exchange": "صرافی خرید", "sell_exchange": "صرافی فروش",
             "net_spread_pct": "بازده خالص ٪", "profit_toman": "سود تخمینی تومان",
@@ -341,14 +341,14 @@ else:
         })
         st.dataframe(stable_view, width="stretch", hide_index=True)
     else:
-        st.info("هنوز فرصت واجد شرایطی در ۳ اسکن متوالی تکرار نشده است. برای بررسی، هر بار «دریافت دوباره قیمت‌ها» را بزنید.")
+        st.info("هنوز فرصت واجد شرایطی در ۵ اسکن متوالی تکرار نشده است. برای بررسی، هر بار «دریافت دوباره قیمت‌ها» را بزنید.")
     st.subheader("اعتبارسنجی اجرای فرضی")
     st.caption(
         "این بخش فقط کیفیت داده و امکان تطبیق حجم روی دفتر سفارش عمومی را می‌سنجد؛ "
         "موجودی حساب، محدودیت سفارش، وضعیت واریز/برداشت و امکان انتقال شبکه را تأیید نمی‌کند."
     )
     validation_cols = [
-        "symbol", "validation_status", "buy_vwap", "sell_vwap",
+        "symbol", "validation_status", "asset_identity_status", "network_status", "deposit_withdraw_status", "buy_vwap", "sell_vwap",
         "buy_levels_used", "sell_levels_used", "depth_coverage_pct",
         "buy_book_age_seconds", "sell_book_age_seconds",
         "snapshot_skew_seconds", "buy_api_latency_ms", "sell_api_latency_ms",
@@ -525,7 +525,7 @@ if not df.empty:
     paper_candidates = df[candidate_mask].copy()
 
 if paper_candidates.empty:
-    st.info("برای ثبت معامله کاغذی، ابتدا باید فرصت مثبت، پایدار در ۳ اسکن و قابل بررسی در شبیه‌سازی وجود داشته باشد.")
+    st.info("برای ثبت معامله کاغذی، ابتدا باید فرصت مثبت، پایدار در ۵ اسکن و قابل بررسی در شبیه‌سازی وجود داشته باشد.")
 else:
     candidate_labels = [
         f"{row['symbol']} | خرید: {row['buy_exchange']} ← فروش: {row['sell_exchange']} | "
@@ -701,7 +701,7 @@ if today_history:
     history_df = pd.DataFrame([{
         "زمان": row["time"].strftime("%Y-%m-%d %H:%M:%S"),
         "تعداد فرصت واجد شرایط": row["opportunities"],
-        "فرصت پایدار (۳ اسکن)": row.get("stable_opportunities", 0),
+        "فرصت پایدار (۵ اسکن)": row.get("stable_opportunities", 0),
         "بهترین جفت‌ارز": row["best_symbol"],
         "بهترین سود تخمینی (تومان)": row["best_profit"],
     } for row in today_history])
