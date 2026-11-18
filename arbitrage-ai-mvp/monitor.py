@@ -81,15 +81,34 @@ def route_key(item):
 
 
 def eligible_opportunities(result):
+    """Reject stale or time-skewed books before any stability count or alert."""
     rows = []
     for item in result.get("opportunities", []):
         try:
             net_pct = float(item.get("net_spread_pct", -999))
             profit = float(item.get("profit_toman", 0))
             used = float(item.get("used_capital_toman", 0))
-        except (TypeError, ValueError):
+            buy_age = float(item.get("buy_book_age_seconds", float("inf")))
+            sell_age = float(item.get("sell_book_age_seconds", float("inf")))
+            skew = float(item.get("snapshot_skew_seconds", float("inf")))
+        except (TypeError, ValueError, OverflowError):
             continue
-        if net_pct >= MIN_NET_PROFIT_PCT and profit > 0 and 0 < used <= CAPITAL_TOMAN:
+        # Scanner must explicitly certify freshness and synchronized snapshots.
+        if item.get("market_data_status") != "داده بازار مناسب شبیه‌سازی":
+            continue
+        if item.get("validation_status") != "فقط شبیه‌سازی؛ انتقال/شبکه تأییدنشده":
+            continue
+        if not all(map(lambda value: value == value and abs(value) != float("inf"),
+                       (net_pct, profit, used, buy_age, sell_age, skew))):
+            continue
+        if (
+            net_pct >= MIN_NET_PROFIT_PCT
+            and profit > 0
+            and 0 < used <= CAPITAL_TOMAN
+            and 0 <= buy_age <= 90
+            and 0 <= sell_age <= 90
+            and 0 <= skew <= 15
+        ):
             rows.append(item)
     return rows
 
