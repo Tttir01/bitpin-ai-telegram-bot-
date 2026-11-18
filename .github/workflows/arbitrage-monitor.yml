@@ -55,3 +55,21 @@ jobs:
         with:
           path: .cache/arbitrage_state.json
           key: arbitrage-state-${{ github.run_id }}
+
+      - name: Notify Telegram when the monitor fails
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "Telegram failure notification skipped: secrets are not configured."
+            exit 0
+          fi
+          MESSAGE="⚠️ خطا در پایشگر آربیتراژ؛ هیچ سفارش واقعی ثبت نشده است. گزارش اجرا: $WORKFLOW_URL"
+          curl --fail --silent --show-error --max-time 15 \
+            --request POST \
+            --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
+            --data-urlencode "text=$MESSAGE" \
+            "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage"
