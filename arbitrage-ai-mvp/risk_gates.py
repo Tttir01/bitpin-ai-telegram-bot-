@@ -4,6 +4,12 @@ These helpers deliberately do not place orders or access the ledger.
 """
 import math
 
+MAX_VWAP_CHANGE_PCT = 0.30
+MAX_MATCHED_VOLUME_CHANGE_PCT = 25.0
+MAX_STABILITY_PROFIT_DROP_PCT = 30.0
+PROFIT_DROP_WARNING_PCT = 3.0
+PAPER_BLOCK_PROFIT_DROP_PCT = 5.0
+
 
 def _number(value):
     try:
@@ -17,7 +23,7 @@ def profit_change_warning(value):
     change = _number(value)
     if change is None:
         return "در انتظار اسکن مقایسه‌ای"
-    if change <= -3.0:
+    if change <= -PROFIT_DROP_WARNING_PCT:
         return "هشدار: افت سود ۳٪ یا بیشتر"
     return "بدون هشدار افت سود"
 
@@ -51,7 +57,7 @@ def is_paper_candidate(
         and used_capital is not None
         and available_capital is not None
         and used_capital <= available_capital
-        and (change is None or change > -5.0)
+        and (change is None or change > -PAPER_BLOCK_PROFIT_DROP_PCT)
         and stress_profit is not None
         and stress_profit > 0
     )
