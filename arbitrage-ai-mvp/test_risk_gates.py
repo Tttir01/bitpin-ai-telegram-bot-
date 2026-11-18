@@ -40,8 +40,8 @@ class PaperTradeGateTests(unittest.TestCase):
     def test_all_valid_conditions_pass(self):
         self.assertTrue(candidate())
 
-    def test_less_than_three_scans_is_blocked(self):
-        self.assertFalse(candidate(stable_scans=2))
+    def test_less_than_five_scans_is_blocked(self):
+        self.assertFalse(candidate(stable_scans=4))
 
     def test_unstable_market_is_blocked(self):
         self.assertFalse(candidate(market_stable_now=False))
@@ -52,9 +52,9 @@ class PaperTradeGateTests(unittest.TestCase):
 
 def candidate(**overrides):
     values = {
-        "stable_scans": 3,
+        "stable_scans": 5,
         "market_stable_now": True,
-        "validation_status": "قابل بررسی در شبیه‌سازی",
+        "validation_status": "فقط شبیه‌سازی؛ انتقال/شبکه تأییدنشده",
         "profit_toman": 10_000,
         "used_capital_toman": 1_000_000,
         "capital": 2_000_000,
