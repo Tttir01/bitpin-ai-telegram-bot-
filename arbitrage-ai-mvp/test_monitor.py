@@ -5,6 +5,7 @@ from monitor import (
     confirm_snapshots,
     record_paper_validations,
     route_key,
+    eligible_opportunities,
 )
 
 
@@ -19,8 +20,33 @@ def opportunity(buy=100, sell=102, profit=10000, net=0.5):
         "profit_toman": profit,
         "used_capital_toman": 1_000_000,
         "net_spread_pct": net,
+        "market_data_status": "داده بازار مناسب شبیه‌سازی",
+        "validation_status": "فقط شبیه‌سازی؛ انتقال/شبکه تأییدنشده",
+        "buy_book_age_seconds": 2,
+        "sell_book_age_seconds": 3,
+        "snapshot_skew_seconds": 1,
     }
 
+
+
+class FreshnessGateTests(unittest.TestCase):
+    def test_fresh_synchronized_route_is_eligible(self):
+        self.assertEqual(len(eligible_opportunities({"opportunities": [opportunity()]})), 1)
+
+    def test_stale_book_is_rejected(self):
+        item = opportunity()
+        item["buy_book_age_seconds"] = 91
+        self.assertEqual(eligible_opportunities({"opportunities": [item]}), [])
+
+    def test_time_skewed_snapshot_is_rejected(self):
+        item = opportunity()
+        item["snapshot_skew_seconds"] = 16
+        self.assertEqual(eligible_opportunities({"opportunities": [item]}), [])
+
+    def test_unvalidated_market_data_is_rejected(self):
+        item = opportunity()
+        item["market_data_status"] = "نیازمند بررسی داده/زمان"
+        self.assertEqual(eligible_opportunities({"opportunities": [item]}), [])
 
 class ConfirmationTests(unittest.TestCase):
     def test_margin_caps_price_change_limit_at_point_one_percent(self):
