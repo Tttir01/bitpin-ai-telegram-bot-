@@ -1,0 +1,39 @@
+name: Arbitrage paper worker
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: arbitrage-paper-worker
+  cancel-in-progress: false
+
+jobs:
+  run-paper-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: arbitrage-ai-mvp
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      CAPITAL_TOMAN: "2000000"
+      RUN_SECONDS: "270"
+      SCAN_INTERVAL_SECONDS: "30"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install worker dependencies
+        run: pip install -r requirements-worker.txt
+      - name: Validate required secrets
+        run: |
+          test -n "$SUPABASE_URL"
+          test -n "$SUPABASE_SERVICE_ROLE_KEY"
+      - name: Run paper-only worker
+        run: python worker.py
