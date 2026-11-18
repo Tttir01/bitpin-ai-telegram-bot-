@@ -1,0 +1,46 @@
+name: Arbitrage paper worker
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: arbitrage-paper-worker
+  cancel-in-progress: false
+
+jobs:
+  run-paper-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: arbitrage-ai-mvp
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      CAPITAL_TOMAN: "2000000"
+      RUN_SECONDS: "270"
+      SCAN_INTERVAL_SECONDS: "30"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install worker dependencies
+        run: pip install -r requirements-worker.txt
+      - name: Check server-side credentials
+        id: credentials
+        shell: bash
+        run: |
+          if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Worker skipped: Supabase Actions secrets are not configured."
+          fi
+      - name: Run paper-only worker
+        if: steps.credentials.outputs.ready == 'true'
+        run: python worker.py
