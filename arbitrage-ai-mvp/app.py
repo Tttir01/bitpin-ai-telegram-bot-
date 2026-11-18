@@ -195,6 +195,8 @@ else:
         "buy_book_age_seconds", "sell_book_age_seconds",
         "snapshot_skew_seconds", "buy_api_latency_ms", "sell_api_latency_ms",
         "net_spread_pct", "profit_toman",
+        "stress_profit_slip_010_toman", "stress_profit_slip_025_toman",
+        "stress_profit_slip_050_toman", "max_extra_slippage_pct",
     ]
     validation_view = df[validation_cols].rename(columns={
         "symbol": "جفت‌ارز",
@@ -211,8 +213,25 @@ else:
         "sell_api_latency_ms": "تأخیر API فروش (ms)",
         "net_spread_pct": "بازده خالص ٪",
         "profit_toman": "سود تخمینی تومان",
+        "stress_profit_slip_010_toman": "سود با ۰٫۱۰٪ لغزش اضافه",
+        "stress_profit_slip_025_toman": "سود با ۰٫۲۵٪ لغزش اضافه",
+        "stress_profit_slip_050_toman": "سود با ۰٫۵۰٪ لغزش اضافه",
+        "max_extra_slippage_pct": "حد تحمل لغزش اضافه ٪",
     })
-    st.dataframe(validation_view, width="stretch", hide_index=True)
+    st.subheader("آزمون فشار لغزش قیمت")
+    st.caption(
+        "در هر سناریو، لغزش اضافه به‌طور هم‌زمان به خرید و فروش افزوده می‌شود؛ "
+        "کارمزد و هزینه انتقال ثابت می‌مانند. این آزمون تخمین تنش است، نه پیش‌بینی اجرای واقعی."
+    )
+    stress_cols = [
+        "جفت‌ارز", "سود با ۰٫۱۰٪ لغزش اضافه", "سود با ۰٫۲۵٪ لغزش اضافه",
+        "سود با ۰٫۵۰٪ لغزش اضافه", "حد تحمل لغزش اضافه ٪",
+    ]
+    st.dataframe(validation_view[stress_cols], width="stretch", hide_index=True)
+    st.dataframe(validation_view.drop(columns=[
+        "سود با ۰٫۱۰٪ لغزش اضافه", "سود با ۰٫۲۵٪ لغزش اضافه",
+        "سود با ۰٫۵۰٪ لغزش اضافه", "حد تحمل لغزش اضافه ٪",
+    ]), width="stretch", hide_index=True)
     st.subheader("فرصت‌های قابل بررسی")
     display = df.rename(columns={
         "symbol": "جفت‌ارز",
