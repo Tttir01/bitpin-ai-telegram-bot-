@@ -365,3 +365,36 @@ def scan_markets(
 
     opportunities.sort(key=lambda item: item["profit_toman"], reverse=True)
     return {"opportunities": opportunities, "errors": errors, "diagnostics": diagnostics}
+
+
+def read_wallex_balances(api_key=None):
+    """Read-only Wallex balance lookup. This function cannot place orders or withdraw."""
+    import os
+
+    key = api_key or os.getenv("WALLEX_API_KEY", "").strip()
+    if not key:
+        return {"configured": False, "balances": [], "message": "WALLEX_API_KEY is not configured."}
+
+    response = requests.get(
+        f"{WALLEX}/v1/account/balances",
+        headers={**HEADERS, "X-API-Key": key},
+        timeout=(5, 18),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict) or payload.get("success") is not True:
+        raise RuntimeError("Wallex balance API returned an invalid response.")
+
+    result = payload.get("result") or {}
+    raw = result.get("balances") or {}
+    balances = []
+    for asset, item in raw.items():
+        if not isinstance(item, dict):
+            continue
+        balances.append({
+            "asset": item.get("faName") or asset,
+            "symbol": asset,
+            "available": item.get("value", "0"),
+            "locked": item.get("locked", "0"),
+        })
+    return {"configured": True, "balances": balances, "message": "Read-only balance data loaded."}
