@@ -5,7 +5,7 @@ import os
 import pandas as pd
 import requests
 import streamlit as st
-from scanner import scan_markets
+from scanner import scan_markets, read_wallex_balances
 from telegram_reports import send_scan_report, send_paper_trade_report, telegram_configured
 from risk_gates import (
     is_paper_candidate, profit_change_warning,
@@ -27,6 +27,26 @@ st.warning(
     "این نسخه سفارش واقعی ثبت نمی‌کند. سودها برآورد شبیه‌سازی بر اساس سطوح قابل مشاهده دفتر سفارش هستند؛ "
     "موجودی حساب، امکان انتقال، شبکه انتقال و تغییر قیمت تا زمان اجرای واقعی تأیید نمی‌شوند."
 )
+
+
+# Wallex private account connection is strictly read-only.
+st.subheader("🔐 اتصال حساب والکس")
+if os.getenv("WALLEX_API_KEY", "").strip():
+    try:
+        wallex_account = read_wallex_balances()
+        if wallex_account.get("configured"):
+            st.success("اتصال API والکس برقرار است؛ دسترسی فقط‌خواندنی.")
+            if wallex_account.get("balances"):
+                st.dataframe(pd.DataFrame(wallex_account["balances"]), hide_index=True, use_container_width=True)
+            else:
+                st.info("اتصال موفق بود؛ موجودی قابل نمایش دریافت نشد.")
+    except requests.RequestException as error:
+        st.error(f"دریافت موجودی والکس ناموفق بود (خطای ارتباط/API: {getattr(error.response, 'status_code', 'network')}).")
+    except Exception:
+        st.error("اتصال موجودی والکس ناموفق بود؛ جزئیات محرمانه نمایش داده نمی‌شود.")
+else:
+    st.info("برای فعال‌سازی اتصال موجودی، کلید API فقط‌خواندنی والکس را در متغیر WALLEX_API_KEY در Render ثبت کنید.")
+st.caption("قفل ایمنی: این برنامه فقط GET موجودی را اجرا می‌کند؛ هیچ مسیر ثبت سفارش، معامله یا برداشت در اتصال والکس استفاده نمی‌شود.")
 
 with st.sidebar:
     st.header("تنظیمات")
