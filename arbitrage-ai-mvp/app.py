@@ -48,6 +48,27 @@ else:
     st.info("برای فعال‌سازی اتصال موجودی، کلید API فقط‌خواندنی والکس را در متغیر WALLEX_API_KEY در Render ثبت کنید.")
 st.caption("قفل ایمنی: این برنامه فقط GET موجودی را اجرا می‌کند؛ هیچ مسیر ثبت سفارش، معامله یا برداشت در اتصال والکس استفاده نمی‌شود.")
 
+# Nobitex private account connection is strictly read-only.
+from nobitex_private import read_nobitex_balances
+st.subheader("🔐 اتصال حساب نوبیتکس")
+if os.getenv("NOBITEX_API_PUBLIC_KEY", "").strip() and os.getenv("NOBITEX_API_PRIVATE_KEY", "").strip():
+    try:
+        nobitex_account = read_nobitex_balances()
+        if nobitex_account.get("configured"):
+            st.success("اتصال API نوبیتکس برقرار است؛ دسترسی فقط‌خواندنی.")
+            if nobitex_account.get("balances"):
+                st.dataframe(pd.DataFrame(nobitex_account["balances"]), hide_index=True, use_container_width=True)
+            else:
+                st.info("اتصال موفق بود؛ پاسخ کیف پول موجودی قابل نمایش نداشت.")
+    except requests.RequestException as error:
+        status = getattr(getattr(error, "response", None), "status_code", "network")
+        st.error(f"دریافت موجودی نوبیتکس ناموفق بود (خطای ارتباط/API: {status}).")
+    except Exception:
+        st.error("اتصال موجودی نوبیتکس ناموفق بود؛ جزئیات محرمانه نمایش داده نمی‌شود.")
+else:
+    st.info("برای فعال‌سازی، دو کلید نوبیتکس را با نام‌های NOBITEX_API_PUBLIC_KEY و NOBITEX_API_PRIVATE_KEY در Render ثبت کنید.")
+st.caption("قفل ایمنی: فقط POST /users/wallets/list با دسترسی READ اجرا می‌شود؛ هیچ endpoint سفارش، معامله، انتقال یا برداشت فراخوانی نمی‌شود.")
+
 with st.sidebar:
     st.header("تنظیمات")
     capital = st.number_input(
