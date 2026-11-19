@@ -1,5 +1,4 @@
 """Authenticated READ-only Nobitex wallet access (Ed25519)."""
-import json
 import os
 import time
 import base64
@@ -29,6 +28,24 @@ def _private_key(value):
     return Ed25519PrivateKey.from_private_bytes(raw)
 
 
+def _wallet_rows(payload):
+    """Normalize both documented list and map-shaped wallet responses."""
+    raw = payload.get("wallets") or payload.get("result") or payload.get("data") or []
+    if isinstance(raw, dict):
+        raw = raw.get("wallets") or raw.get("items") or raw
+    if isinstance(raw, dict):
+        rows = []
+        for currency, item in raw.items():
+            if isinstance(item, dict):
+                row = dict(item)
+                row.setdefault("currency", currency)
+                rows.append(row)
+        return rows
+    if isinstance(raw, list):
+        return [item for item in raw if isinstance(item, dict)]
+    return []
+
+
 def read_nobitex_balances():
     """Fetch the spot wallet list only. No trading, transfer, or withdrawal endpoints."""
     public_key = os.getenv("NOBITEX_API_PUBLIC_KEY", "").strip()
@@ -36,21 +53,21 @@ def read_nobitex_balances():
     if not public_key or not private_value:
         return {"configured": False, "balances": [], "message": "Nobitex read-only keys are not configured."}
 
-    method = "POST"
+    # The documented wallet-list route is GET. For a GET request the signed
+    # message has an empty body; do not send the former POST wallet payload.
+    method = "GET"
     path = "/users/wallets/list"
-    body = json.dumps({"wallet": "spot"}, separators=(",", ":"))
+    body = ""
     timestamp = str(int(time.time()))
     message = (timestamp + method + path + body).encode("utf-8")
     signature = base64.urlsafe_b64encode(_private_key(private_value).sign(message)).decode("ascii")
 
-    response = requests.post(
+    response = requests.get(
         NOBITEX_API + path,
-        data=body,
         headers={
             "Nobitex-Key": public_key,
             "Nobitex-Signature": signature,
             "Nobitex-Timestamp": timestamp,
-            "Content-Type": "application/json",
             "Accept": "application/json",
         },
         timeout=(5, 18),
@@ -60,18 +77,12 @@ def read_nobitex_balances():
     if not isinstance(payload, dict) or payload.get("status") not in ("ok", "success"):
         raise RuntimeError("Nobitex wallet API returned an unsuccessful response.")
 
-    raw = payload.get("wallets") or payload.get("result") or payload.get("data") or []
-    if isinstance(raw, dict):
-        raw = raw.get("wallets") or raw.get("items") or []
     balances = []
-    if isinstance(raw, list):
-        for item in raw:
-            if not isinstance(item, dict):
-                continue
-            balances.append({
-                "ارز": item.get("currency") or item.get("symbol") or item.get("code") or "—",
-                "موجودی کل": item.get("balance", item.get("total", "—")),
-                "قابل استفاده": item.get("activeBalance", item.get("available", item.get("usable", "—"))),
-                "بلوکه": item.get("blockedBalance", item.get("blocked", item.get("locked", "—"))),
-            })
+    for item in _wallet_rows(payload):
+        balances.append({
+            "ارز": item.get("currency") or item.get("symbol") or item.get("code") or "—",
+            "موجودی کل": item.get("balance", item.get("total", "—")),
+            "قابل استفاده": item.get("activeBalance", item.get("available", item.get("usable", "—"))),
+            "بلوکه": item.get("blockedBalance", item.get("blocked", item.get("locked", "—"))),
+        })
     return {"configured": True, "balances": balances, "message": "Read-only wallet data loaded."}
