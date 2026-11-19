@@ -67,7 +67,7 @@ if os.getenv("NOBITEX_API_PUBLIC_KEY", "").strip() and os.getenv("NOBITEX_API_PR
         st.error("اتصال موجودی نوبیتکس ناموفق بود؛ جزئیات محرمانه نمایش داده نمی‌شود.")
 else:
     st.info("برای فعال‌سازی، دو کلید نوبیتکس را با نام‌های NOBITEX_API_PUBLIC_KEY و NOBITEX_API_PRIVATE_KEY در Render ثبت کنید.")
-st.caption("قفل ایمنی: فقط GET /users/wallets/list اجرا می‌شود؛ هیچ endpoint سفارش، معامله، انتقال یا برداشت فراخوانی نمی‌شود.")
+st.caption("قفل ایمنی: فقط POST /users/wallets/list با دسترسی READ اجرا می‌شود؛ هیچ endpoint سفارش، معامله، انتقال یا برداشت فراخوانی نمی‌شود.")
 
 with st.sidebar:
     st.header("تنظیمات")
