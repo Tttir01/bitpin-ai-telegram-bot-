@@ -71,6 +71,7 @@ def send_telegram(message):
     payload = response.json()
     if not payload.get("ok"):
         raise RuntimeError("Telegram API rejected the message.")
+    print("Telegram message delivered successfully.")
     return True
 
 
@@ -328,6 +329,7 @@ def main():
 
     today = datetime.now(TEHRAN).strftime("%Y-%m-%d")
     digest_key = f"daily_digest_{today}"
+    daily_digest_sent = 0
     if digest_key not in alerts:
         diagnostics = second_result.get("diagnostics", {})
         lines = [
@@ -342,6 +344,7 @@ def main():
         try:
             if send_telegram("\n".join(lines)):
                 alerts[digest_key] = now
+                daily_digest_sent = 1
         except (requests.RequestException, RuntimeError) as error:
             print(f"Daily digest failed: {type(error).__name__}: {error}")
 
@@ -353,9 +356,13 @@ def main():
         "stable": len(stable),
     }
     save_state(state)
+    telegram_messages_sent = sent + daily_digest_sent
+    digest_status = "sent" if daily_digest_sent else "already_sent_or_not_due"
     print(
         f"Completed: confirmed={len(confirmed)}, stable={len(stable)}, "
-        f"paper validations added={len(new_validations)}, Telegram alerts={sent}"
+        f"paper validations added={len(new_validations)}, "
+        f"Telegram messages sent={telegram_messages_sent} "
+        f"(opportunity alerts={sent}, daily digest={digest_status})."
     )
 
 
