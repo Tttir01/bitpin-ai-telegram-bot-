@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "arbitrage-ai-mvp/**"
+      - "arbitrage_mvp/**"
       - ".github/workflows/arbitrage-paper-ci.yml"
   push:
     branches: [main]
@@ -21,7 +22,12 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install application dependencies
-        run: pip install -r arbitrage-ai-mvp/requirements.txt
+        run: |
+          pip install -r arbitrage-ai-mvp/requirements.txt
+          pip install -r arbitrage_mvp/requirements.txt
+      - name: Run standalone MVP offline tests
+        working-directory: arbitrage_mvp
+        run: python -m unittest -v test_mvp.py
       - name: Run paper monitor and risk-gate tests
         working-directory: arbitrage-ai-mvp
         run: python -m unittest -v test_risk_gates.py test_monitor.py test_monitor_entrypoint.py test_account_readonly.py test_scanner.py
