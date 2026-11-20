@@ -45,6 +45,23 @@ jobs:
           python-version: "3.12"
       - name: Install MVP dependencies
         run: pip install -r arbitrage_mvp/requirements.txt
+      - name: Diagnose public Wallex Engine.IO handshake
+        working-directory: arbitrage_mvp
+        run: |
+          python - <<'PY'
+          import requests
+          for version in (3, 4):
+              try:
+                  response = requests.get(
+                      "https://api.wallex.ir/socket.io/",
+                      params={"EIO": version, "transport": "polling"},
+                      timeout=10,
+                  )
+                  print(f"Engine.IO v{version}: HTTP {response.status_code}; "
+                        f"body={response.text[:240]!r}")
+              except requests.RequestException as exc:
+                  print(f"Engine.IO v{version}: {type(exc).__name__}: {exc}")
+          PY
       - name: Connect to public Wallex depth stream (read-only)
         working-directory: arbitrage_mvp
         run: python run_wallex_stream.py --wait 8
