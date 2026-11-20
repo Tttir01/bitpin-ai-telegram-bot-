@@ -48,7 +48,7 @@ def collect_wallex_stream(wait_seconds=8):
 
     received = {}
     client = socketio.Client(
-        reconnection=True, logger=False, engineio_logger=False,
+        reconnection=True, logger=True, engineio_logger=True,
     )
 
     @client.on("Broadcaster")
