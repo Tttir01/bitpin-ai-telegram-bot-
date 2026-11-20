@@ -22,6 +22,82 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.title("📈 هوش مصنوعی آربیتراژ")
+
+# Diagnostic runs only when requested by the dashboard user. It never accesses private APIs.
+with st.expander("🧪 آزمایش اتصال زندهٔ والکس از سرور Render", expanded=False):
+    st.caption(
+        "این آزمایش فقط به API عمومی وصل می‌شود؛ سفارش، برداشت یا انتقالی انجام نمی‌دهد. "
+        "دادهٔ عمق والکس timestamp سمت سرور ندارد، پس موفقیت اتصال به‌تنهایی مجوز سیگنال معاملاتی نیست."
+    )
+    if st.button("آزمایش اتصال زنده والکس", key="wallex_live_diagnostic"):
+        import time
+        import socketio
+
+        rest_ok = False
+        try:
+            response = requests.get(
+                "https://api.wallex.ir/v1/depth",
+                params={"symbol": "USDTTMN"},
+                headers={"Accept": "application/json", "User-Agent": "ArbitrageMVP-ReadOnly/1.0"},
+                timeout=(5, 12),
+            )
+            response.raise_for_status()
+            payload = response.json()
+            rest_ok = bool(
+                isinstance(payload, dict)
+                and payload.get("success") is True
+                and isinstance(payload.get("result"), dict)
+            )
+            if rest_ok:
+                st.success(f"REST عمومی والکس: پاسخ معتبر (HTTP {response.status_code}).")
+            else:
+                st.warning(f"REST عمومی والکس پاسخ داد، اما ساختار عمق مورد انتظار نبود (HTTP {response.status_code}).")
+        except Exception as error:
+            status = getattr(getattr(error, "response", None), "status_code", "network")
+            st.error(f"REST عمومی والکس ناموفق: {type(error).__name__}؛ وضعیت {status}.")
+
+        received_channels = set()
+        client = socketio.Client(reconnection=False, logger=False, engineio_logger=False)
+
+        @client.on("Broadcaster")
+        def _wallex_broadcaster(channel, data):
+            if channel in ("USDTTMN@buyDepth", "USDTTMN@sellDepth") and isinstance(data, (dict, list)) and data:
+                received_channels.add(channel)
+
+        try:
+            client.connect(
+                "https://api.wallex.ir",
+                transports=["websocket"],
+                socketio_path="socket.io",
+                wait_timeout=10,
+            )
+            st.success("اتصال Socket.IO برقرار شد.")
+            client.emit("subscribe", {"channel": "USDTTMN@buyDepth"})
+            client.emit("subscribe", {"channel": "USDTTMN@sellDepth"})
+            deadline = time.monotonic() + 7
+            while time.monotonic() < deadline and len(received_channels) < 2:
+                time.sleep(0.1)
+            if len(received_channels) == 2:
+                st.success("پیام عمق خرید و فروش USDTTMN از جریان زنده دریافت شد.")
+            else:
+                st.warning(
+                    "اتصال برقرار شد، اما هر دو کانال عمق در مهلت آزمایش پیام ندادند. "
+                    f"کانال‌های دریافت‌شده: {', '.join(sorted(received_channels)) or 'هیچ‌کدام'}."
+                )
+        except Exception as error:
+            st.error(
+                f"اتصال Socket.IO از سرور Render ناموفق بود: {type(error).__name__}: {str(error)[:220]}"
+            )
+        finally:
+            if client.connected:
+                client.disconnect()
+
+        st.info(
+            "تفسیر: نتیجهٔ این آزمایش فقط دسترسی شبکه و دریافت پیام را مشخص می‌کند. "
+            "تا وقتی timestamp معتبر سمت صرافی یا سازوکار تازگی مستقل تأیید نشود، "
+            "این داده‌ها به سیگنال واجد شرایط تبدیل نمی‌شوند."
+        )
+
 st.caption("نسخه آزمایشی ۰.۹ | گزارش عملکرد معاملات کاغذی و تشخیص فرصت پایدار")
 st.warning(
     "این نسخه سفارش واقعی ثبت نمی‌کند. سودها برآورد شبیه‌سازی بر اساس سطوح قابل مشاهده دفتر سفارش هستند؛ "
