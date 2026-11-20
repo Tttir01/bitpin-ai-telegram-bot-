@@ -36,9 +36,13 @@ jobs:
   wallex-live-diagnostic:
     name: Wallex live Socket.IO diagnostic (non-blocking)
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.runner }}
     continue-on-error: true
-    timeout-minutes: 3
+    timeout-minutes: 4
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
