@@ -53,6 +53,7 @@ jobs:
         run: pip install -r arbitrage_mvp/requirements.txt
       - name: Diagnose public Wallex Engine.IO handshake
         working-directory: arbitrage_mvp
+        shell: bash
         run: |
           python - <<'PY'
           import requests
@@ -70,4 +71,5 @@ jobs:
           PY
       - name: Connect to public Wallex depth stream (read-only)
         working-directory: arbitrage_mvp
+        shell: bash
         run: python run_wallex_stream.py --wait 8
