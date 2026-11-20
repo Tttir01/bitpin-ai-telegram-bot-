@@ -1,4 +1,7 @@
-"""پایش زمان‌بندی‌شده MVP؛ فقط داده عمومی و گزارش تلگرام، بدون سفارش."""
+"""پایش زمان‌بندی‌شده MVP؛ فقط داده عمومی و گزارش تلگرام، بدون سفارش.
+
+Push-triggered runs of this entrypoint are read-only smoke checks.
+"""
 from dataclasses import asdict
 from datetime import datetime, timezone
 import os
