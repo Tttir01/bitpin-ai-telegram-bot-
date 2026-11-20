@@ -1,11 +1,13 @@
 import tempfile
+import requests
+from datetime import datetime, timezone
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 import time
 
-from scanner import normalize_symbol, _levels, scan, _retry_seconds, fetch_nobitex
+from scanner import normalize_symbol, _levels, scan, _retry_seconds, fetch_nobitex, get_json, _timestamp
 from db import save_scan, connect
 
 
@@ -72,6 +74,28 @@ class MVPTests(unittest.TestCase):
              patch("scanner.fetch_nobitex", return_value={"BTC/IRT": nobitex}):
             result = scan(self.settings())
         self.assertGreaterEqual(result["accepted_count"], 1)
+
+
+    @patch("scanner.time.sleep")
+    @patch("scanner.requests.get")
+    def test_get_json_retries_transient_network_failure(self, mock_get, mock_sleep):
+        success = SimpleNamespace(
+            status_code=200,
+            headers={},
+            raise_for_status=lambda: None,
+            json=lambda: {"success": True},
+        )
+        mock_get.side_effect = [requests.ConnectionError("temporary"), success]
+        self.assertEqual(get_json("https://example.test/data"), {"success": True})
+        mock_sleep.assert_called_once_with(1.0)
+        self.assertEqual(mock_get.call_count, 2)
+
+    def test_iso_exchange_timestamp_is_parsed(self):
+        expected = datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp()
+        self.assertEqual(
+            _timestamp({"timestamp": "2026-01-01T00:00:00Z"}),
+            expected,
+        )
 
     def test_retry_after_is_bounded(self):
         response = SimpleNamespace(headers={"Retry-After": "120"})
