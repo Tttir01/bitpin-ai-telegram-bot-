@@ -28,8 +28,8 @@ MIN_STABLE_SCANS = 5
 MAX_VWAP_CHANGE_PCT = 0.10
 MAX_VOLUME_CHANGE_PCT = 25.0
 MAX_PROFIT_DROP_PCT = 30.0
-# Scheduled scans target 5 minutes; gaps above 15 minutes break the streak.
-MAX_STABILITY_GAP_SECONDS = 15 * 60
+# The external free scheduler runs hourly; tolerate normal scheduler jitter up to 90 minutes.
+MAX_STABILITY_GAP_SECONDS = 90 * 60
 MAX_LEDGER_ROWS = 500
 
 
