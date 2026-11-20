@@ -31,3 +31,20 @@ jobs:
       - name: Run paper monitor and risk-gate tests
         working-directory: arbitrage-ai-mvp
         run: python -m unittest -v test_risk_gates.py test_monitor.py test_monitor_entrypoint.py test_account_readonly.py test_scanner.py
+
+  wallex-live-diagnostic:
+    name: Wallex live Socket.IO diagnostic (non-blocking)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install MVP dependencies
+        run: pip install -r arbitrage_mvp/requirements.txt
+      - name: Connect to public Wallex depth stream (read-only)
+        working-directory: arbitrage_mvp
+        run: python run_wallex_stream.py --wait 8
