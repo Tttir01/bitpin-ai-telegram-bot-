@@ -133,7 +133,9 @@ if should_scan:
         eligible_items = {
             (item.get("symbol"), item.get("buy_exchange"), item.get("sell_exchange")): item
             for item in result.get("opportunities", [])
-            if item.get("net_spread_pct", -999) >= min_net
+            if item.get("market_data_status") == "داده بازار مناسب شبیه‌سازی"
+            and item.get("validation_status") == "فقط شبیه‌سازی؛ انتقال/شبکه تأییدنشده"
+            and item.get("net_spread_pct", -999) >= min_net
             and item.get("profit_toman", 0) > 0
             and item.get("used_capital_toman", 0) >= min_executable
         }
@@ -242,7 +244,9 @@ d.metric("جفت‌ارز مشترک", str(diagnostics.get("common_symbols", "�
 df = pd.DataFrame(result.get("opportunities", []))
 if not df.empty:
     df = df[
-        (df["net_spread_pct"] >= min_net)
+        (df["market_data_status"] == "داده بازار مناسب شبیه‌سازی")
+        & (df["validation_status"] == "فقط شبیه‌سازی؛ انتقال/شبکه تأییدنشده")
+        & (df["net_spread_pct"] >= min_net)
         & (df["profit_toman"] > 0)
         & (df["used_capital_toman"] >= min_executable)
     ].copy()
