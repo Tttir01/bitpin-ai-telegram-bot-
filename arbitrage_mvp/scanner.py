@@ -27,8 +27,16 @@ def _retry_seconds(response, attempt):
 
 
 def get_json(url, timeout=15, retries=2):
+    last_error = None
     for attempt in range(retries + 1):
-        response = requests.get(url, headers=HEADERS, timeout=(5, timeout))
+        try:
+            response = requests.get(url, headers=HEADERS, timeout=(5, timeout))
+        except requests.RequestException as exc:
+            last_error = exc
+            if attempt >= retries:
+                raise
+            time.sleep(min(8.0, 2.0 ** attempt))
+            continue
         if response.status_code in RETRYABLE and attempt < retries:
             time.sleep(_retry_seconds(response, attempt))
             continue
@@ -37,6 +45,8 @@ def get_json(url, timeout=15, retries=2):
         if not isinstance(payload, dict):
             raise ValueError("پاسخ API ساختار JSON شیء ندارد.")
         return payload
+    if last_error:
+        raise last_error
     raise RuntimeError("دریافت داده پس از تلاش مجدد ناموفق بود.")
 
 
@@ -81,12 +91,18 @@ def _timestamp(book):
             continue
         try:
             stamp = float(value)
-            if stamp > 10**12:
-                stamp /= 1000
-            if stamp > 10**9:
-                return stamp
         except (TypeError, ValueError):
-            continue
+            try:
+                parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                return parsed.timestamp()
+            except (TypeError, ValueError, OverflowError):
+                continue
+        if stamp > 10**12:
+            stamp /= 1000
+        if stamp > 10**9:
+            return stamp
     return None
 
 
