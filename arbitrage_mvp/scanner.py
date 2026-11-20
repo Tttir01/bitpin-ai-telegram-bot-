@@ -134,7 +134,7 @@ def fetch_nobitex(timeout=15, irt_divisor=10):
         bids = _levels(item.get("bids"), "bid")
         if not asks or not bids:
             continue
-        # ضریب تبدیل قابل تنظیم است و باید با مستندات/نمونه قیمت همان روز تأیید شود.
+        # قیمت بازارهای ریالی نوبیتکس بر حسب ریال است؛ برای محاسبه تومانی بر 10 تقسیم می‌شود.
         divisor = irt_divisor if symbol.endswith("/IRT") else 1.0
         asks = [(p / divisor, q) for p, q in asks]
         bids = [(p / divisor, q) for p, q in bids]
