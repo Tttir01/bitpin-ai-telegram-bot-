@@ -2,6 +2,10 @@ name: Arbitrage AI Market Monitor
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "arbitrage_mvp/run_monitor.py"
 
 concurrency:
   group: arbitrage-ai-market-monitor
@@ -9,6 +13,7 @@ concurrency:
 
 jobs:
   scan-and-alert:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
