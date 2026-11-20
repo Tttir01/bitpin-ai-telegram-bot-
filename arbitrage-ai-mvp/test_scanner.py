@@ -1,8 +1,9 @@
 import unittest
+import time
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from scanner import _retry_delay, get_json, normalize_symbol, parse_levels
+from scanner import _retry_delay, get_json, normalize_symbol, parse_levels, scan_markets
 
 
 class RetryAfterTests(unittest.TestCase):
@@ -53,6 +54,53 @@ class NormalizationTests(unittest.TestCase):
         levels = [["101", "2"], ["99", "1"], ["bad", "3"], ["100", "0"]]
         self.assertEqual(parse_levels(levels, "ask"), [(99.0, 1.0), (101.0, 2.0)])
         self.assertEqual(parse_levels(levels, "bid"), [(101.0, 2.0), (99.0, 1.0)])
+
+
+
+class FreshnessGateTests(unittest.TestCase):
+    @patch("scanner.nobitex_books")
+    @patch("scanner.wallex_books")
+    def test_missing_exchange_timestamp_never_passes_paper_market_gate(
+        self, mock_wallex, mock_nobitex
+    ):
+        received = time.time()
+        wallex_book = {
+            "asks": [(100.0, 100.0)],
+            "bids": [(99.0, 100.0)],
+            "updated_at": None,
+            "received_at": received,
+            "latency_ms": 10,
+            "source": "Wallex",
+        }
+        nobitex_book = {
+            "asks": [(110.0, 100.0)],
+            "bids": [(109.0, 100.0)],
+            "updated_at": received,
+            "received_at": received,
+            "latency_ms": 10,
+            "source": "Nobitex",
+        }
+        mock_wallex.return_value = {"BTC/IRT": wallex_book}
+        mock_nobitex.return_value = {"BTC/IRT": nobitex_book}
+
+        result = scan_markets(
+            fee_local=0.0025,
+            fee_global=0.0025,
+            slippage_pct=0.0,
+            transfer_cost_pct=0.0,
+            capital_toman=2_000_000,
+        )
+
+        self.assertTrue(result["opportunities"])
+        for opportunity in result["opportunities"]:
+            self.assertNotEqual(
+                opportunity["market_data_status"], "داده بازار مناسب شبیه‌سازی"
+            )
+            self.assertIn("مهر زمانی", opportunity["market_data_status"])
+            self.assertNotEqual(
+                opportunity["validation_status"],
+                "فقط شبیه‌سازی؛ انتقال/شبکه تأییدنشده",
+            )
 
 
 if __name__ == "__main__":
