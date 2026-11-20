@@ -1,6 +1,7 @@
 name: Arbitrage paper pipeline CI
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [main]
     paths:
@@ -35,7 +36,7 @@ jobs:
 
   wallex-live-diagnostic:
     name: Wallex live Socket.IO diagnostic (non-blocking)
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
