@@ -1,4 +1,7 @@
 import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+
 import requests
 
 WALLEX = "https://api.wallex.ir"
@@ -10,23 +13,51 @@ HEADERS = {
 MAX_BOOK_AGE_SECONDS = 90
 
 
+RETRYABLE_STATUS_CODES = (429, 500, 502, 503, 504)
+MAX_RETRY_AFTER_SECONDS = 30
+
+
+def _retry_delay(response, attempt):
+    """Honor Retry-After when supplied; otherwise use bounded exponential backoff."""
+    headers = getattr(response, "headers", {}) or {}
+    retry_after = headers.get("Retry-After")
+    if retry_after:
+        try:
+            seconds = float(retry_after)
+        except (TypeError, ValueError):
+            try:
+                retry_at = parsedate_to_datetime(retry_after)
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=timezone.utc)
+                seconds = (retry_at - datetime.now(timezone.utc)).total_seconds()
+            except (TypeError, ValueError, OverflowError):
+                seconds = None
+        if seconds is not None:
+            return min(MAX_RETRY_AFTER_SECONDS, max(0.0, seconds))
+    return min(8.0, float(2 ** attempt))
+
+
 def get_json(url, retries=2):
+    """GET JSON with bounded retries and respect for exchange rate-limit hints."""
     last_error = None
     for attempt in range(retries + 1):
         try:
             response = requests.get(url, timeout=(5, 18), headers=HEADERS)
-            if response.status_code in (429, 500, 502, 503, 504) and attempt < retries:
-                time.sleep(attempt + 1)
+            if response.status_code in RETRYABLE_STATUS_CODES and attempt < retries:
+                time.sleep(_retry_delay(response, attempt))
                 continue
             response.raise_for_status()
             return response.json()
         except requests.RequestException as error:
             last_error = error
-            status = getattr(getattr(error, "response", None), "status_code", None)
-            if status not in (None, 429, 500, 502, 503, 504) or attempt >= retries:
+            response = getattr(error, "response", None)
+            status = getattr(response, "status_code", None)
+            if status not in (None, *RETRYABLE_STATUS_CODES) or attempt >= retries:
                 raise
-            time.sleep(attempt + 1)
-    raise last_error
+            time.sleep(_retry_delay(response, attempt))
+    if last_error:
+        raise last_error
+    raise RuntimeError("دریافت داده بازار پس از تلاش مجدد ناموفق بود.")
 
 
 def normalize_symbol(raw, quotes):
