@@ -28,8 +28,8 @@ MIN_STABLE_SCANS = 5
 MAX_VWAP_CHANGE_PCT = 0.10
 MAX_VOLUME_CHANGE_PCT = 25.0
 MAX_PROFIT_DROP_PCT = 30.0
-# Scheduled scans target 5 minutes; gaps above 15 minutes break the streak.
-MAX_STABILITY_GAP_SECONDS = 15 * 60
+# The external free scheduler runs hourly; tolerate normal scheduler jitter up to 90 minutes.
+MAX_STABILITY_GAP_SECONDS = 90 * 60
 MAX_LEDGER_ROWS = 500
 
 
@@ -197,7 +197,9 @@ def update_stability(candidates, state, now=None):
         consecutive = False
         if old:
             try:
-                elapsed = now - float(old.get("timestamp", 0))
+                if old.get("timestamp") is None:
+                    raise ValueError("missing previous stability timestamp")
+                elapsed = now - float(old["timestamp"])
                 buy_move = _move_pct(snapshot["buy_vwap"], old.get("buy_vwap"))
                 sell_move = _move_pct(snapshot["sell_vwap"], old.get("sell_vwap"))
                 volume_move = _move_pct(snapshot["quantity"], old.get("quantity"))

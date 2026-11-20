@@ -57,12 +57,20 @@ class FreshnessGateTests(unittest.TestCase):
         self.assertEqual(update_stability([first], state, now=1000)[route_key(first)], 1)
         self.assertEqual(update_stability([second], state, now=1300)[route_key(second)], 2)
 
-    def test_stability_streak_resets_after_scheduler_gap(self):
+    def test_stability_streak_increments_for_hourly_scheduler(self):
+        from monitor import update_stability
+        state = {"stability": {}}
+        item = opportunity()
+        self.assertEqual(update_stability([item], state, now=1000)[route_key(item)], 1)
+        counts = update_stability([item], state, now=1000 + 3600)
+        self.assertEqual(counts[route_key(item)], 2)
+
+    def test_stability_streak_resets_after_gap_over_90_minutes(self):
         from monitor import update_stability
         state = {"stability": {}}
         item = opportunity()
         update_stability([item], state, now=1000)
-        counts = update_stability([item], state, now=1000 + 901)
+        counts = update_stability([item], state, now=1000 + 5401)
         self.assertEqual(counts[route_key(item)], 1)
 
     def test_stability_streak_resets_when_timestamp_is_missing(self):
