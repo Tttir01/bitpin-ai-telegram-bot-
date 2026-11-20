@@ -1,8 +1,7 @@
 """Probe the documented Wallex Hector public markets endpoint (read-only).
 
-This endpoint is documented for markets metadata, not as an order-book source.
-The probe reports structure and timestamp-like field names without treating any
-market/trade timestamp as an order-book timestamp.
+This endpoint is documented for market metadata, not as an order-book source.
+No market/trade timestamp is ever treated as an order-book timestamp.
 """
 import json
 import requests
@@ -16,8 +15,7 @@ def walk(value, path="$"):
         for key, child in value.items():
             child_path = f"{path}.{key}"
             if any(token in key.lower() for token in ("time", "date", "update", "timestamp")):
-                rendered = json.dumps(child, ensure_ascii=False)[:180]
-                print(f"FIELD {child_path} = {rendered}")
+                print(f"TIME_FIELD {child_path}={json.dumps(child, ensure_ascii=False)[:160]}")
             walk(child, child_path)
     elif isinstance(value, list):
         for index, child in enumerate(value[:3]):
@@ -28,35 +26,43 @@ def main():
     try:
         response = requests.get(URL, headers=HEADERS, timeout=(5, 15))
         print(f"GET {URL} -> HTTP {response.status_code}")
-        print(f"content-type={response.headers.get('Content-Type', '')}")
         response.raise_for_status()
         payload = response.json()
     except (requests.RequestException, ValueError) as exc:
         print(f"HECTOR_MARKETS_PROBE_FAILED: {type(exc).__name__}: {exc}")
         return 2
 
-    if not isinstance(payload, (dict, list)):
+    if not isinstance(payload, dict):
         print(f"Unexpected response type: {type(payload).__name__}")
         return 2
 
-    print("top-level-type=" + type(payload).__name__)
-    if isinstance(payload, dict):
-        print("top-level-keys=" + ",".join(map(str, list(payload.keys())[:40])))
-    walk(payload)
+    print("top-level-keys=" + ",".join(map(str, list(payload.keys())[:40])))
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        print("result is not an object")
+        return 2
+    print("result-keys=" + ",".join(map(str, list(result.keys())[:40])))
 
-    # Show a compact sample shape only; never print credentials or full payload.
-    if isinstance(payload, dict):
-        for key, value in payload.items():
-            if isinstance(value, dict):
-                print("sample-object-key=" + str(key))
-                print("sample-object-fields=" + ",".join(map(str, list(value.keys())[:60])))
-                break
-            if isinstance(value, list) and value and isinstance(value[0], dict):
-                print("sample-list-key=" + str(key))
-                print("sample-list-fields=" + ",".join(map(str, list(value[0].keys())[:60])))
-                break
+    markets = result.get("markets")
+    if isinstance(markets, dict):
+        print(f"markets-type=dict count={len(markets)}")
+        if markets:
+            symbol, sample = next(iter(markets.items()))
+            print(f"sample-market={symbol}")
+            if isinstance(sample, dict):
+                print("sample-market-fields=" + ",".join(map(str, list(sample.keys())[:80])))
+                for key, value in sample.items():
+                    if isinstance(value, dict):
+                        print(f"sample-nested-{key}-fields=" + ",".join(map(str, list(value.keys())[:50])))
+    elif isinstance(markets, list):
+        print(f"markets-type=list count={len(markets)}")
+        if markets and isinstance(markets[0], dict):
+            print("sample-market-fields=" + ",".join(map(str, list(markets[0].keys())[:80])))
+    else:
+        print(f"markets-type={type(markets).__name__}")
 
-    print("NOTE: this documented endpoint is a markets-metadata probe, not proof of order-book timestamps.")
+    walk(result)
+    print("NOTE: metadata/trade timestamps are not order-book timestamps.")
     return 0
 
 
