@@ -73,7 +73,7 @@ def collect_wallex_stream(wait_seconds=8):
 
     try:
         client.connect(
-            WALLEX, transports=["websocket"], wait_timeout=10,
+            WALLEX, transports=["websocket"],
             socketio_path="socket.io",
         )
         for raw_symbol in symbols:
