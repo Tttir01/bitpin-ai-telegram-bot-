@@ -71,3 +71,47 @@ jobs:
             --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
             --data-urlencode "text=$MESSAGE" \
             "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage"
+
+  read-only-mvp:
+    name: Read-only Wallex/Nobitex MVP report
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install MVP dependencies
+        run: pip install -r arbitrage_mvp/requirements.txt
+      - name: Restore SQLite scan history
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/arbitrage_history.sqlite3
+          key: arbitrage-mvp-history-${{ github.run_id }}
+          restore-keys: |
+            arbitrage-mvp-history-
+      - name: Scan public order books and report status
+        env:
+          DB_PATH: ".cache/arbitrage_history.sqlite3"
+          CAPITAL_TOMAN: "2000000"
+          MIN_NET_PROFIT_TOMAN: "1000"
+          WALLEX_FEE_PCT: "0.25"
+          NOBITEX_FEE_PCT: "0.25"
+          SLIPPAGE_PCT_PER_SIDE: "0.20"
+          TRANSFER_COST_PCT: "0.30"
+          FEES_CONFIRMED: "false"
+          TRANSFER_COST_CONFIRMED: "false"
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: python arbitrage_mvp/run_monitor.py
+      - name: Persist SQLite scan history
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/arbitrage_history.sqlite3
+          key: arbitrage-mvp-history-${{ github.run_id }}
