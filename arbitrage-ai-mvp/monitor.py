@@ -197,7 +197,9 @@ def update_stability(candidates, state, now=None):
         consecutive = False
         if old:
             try:
-                elapsed = now - float(old.get("timestamp", 0))
+                if old.get("timestamp") is None:
+                    raise ValueError("missing previous stability timestamp")
+                elapsed = now - float(old["timestamp"])
                 buy_move = _move_pct(snapshot["buy_vwap"], old.get("buy_vwap"))
                 sell_move = _move_pct(snapshot["sell_vwap"], old.get("sell_vwap"))
                 volume_move = _move_pct(snapshot["quantity"], old.get("quantity"))
