@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 import time
 
-from scanner import normalize_symbol, _levels, scan, _retry_seconds
+from scanner import normalize_symbol, _levels, scan, _retry_seconds, fetch_nobitex
 from db import save_scan, connect
 
 
@@ -29,6 +29,20 @@ class MVPTests(unittest.TestCase):
     def test_orderbook_levels_sorted_and_invalid_removed(self):
         levels = _levels([[100, 1], [102, 2], ["bad", 3], [101, 0]], "ask")
         self.assertEqual(levels, [(100.0, 1.0), (102.0, 2.0)])
+
+    def test_nobitex_irt_prices_are_converted_from_rial_to_toman(self):
+        payload = {
+            "status": "ok",
+            "BTCIRT": {
+                "lastUpdate": int(time.time() * 1000),
+                "asks": [["1476091000", "1.016"]],
+                "bids": [["1470001120", "0.126571"]],
+            },
+        }
+        with patch("scanner.get_json", return_value=payload):
+            books = fetch_nobitex(3, irt_divisor=10)
+        self.assertEqual(books["BTC/IRT"]["asks"][0][0], 147609100.0)
+        self.assertEqual(books["BTC/IRT"]["bids"][0][0], 147000112.0)
 
     def test_missing_exchange_timestamps_reject_signal(self):
         now = time.time()
