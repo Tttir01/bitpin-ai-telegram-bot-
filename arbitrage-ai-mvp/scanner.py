@@ -331,16 +331,33 @@ def scan_markets(
                     f"مهر صرافی: خرید {effective_buy_age:.1f}s / فروش {effective_sell_age:.1f}s؛ "
                     "زمان والکس فقط زمان دریافت محلی است"
                 )
+                # A local receive timestamp is not proof of exchange-side book freshness.
+                # Wallex's public depth snapshot currently has no exchange timestamp, so
+                # it must never pass the freshness gate merely because the HTTP request was recent.
+                timestamps_verified = (
+                    buy_book["updated_at"] is not None
+                    and sell_book["updated_at"] is not None
+                )
+                exchange_skew = (
+                    abs(buy_book["updated_at"] - sell_book["updated_at"])
+                    if timestamps_verified else None
+                )
                 freshness_ok = (
-                    effective_buy_age <= max_book_age_seconds
+                    timestamps_verified
+                    and effective_buy_age <= max_book_age_seconds
                     and effective_sell_age <= max_book_age_seconds
                 )
-                snapshot_ok = snapshot_skew <= 15
-                market_data_status = (
-                    "داده بازار مناسب شبیه‌سازی"
-                    if freshness_ok and snapshot_ok and net_profit > 0
-                    else "نیازمند بررسی داده/زمان"
+                snapshot_ok = (
+                    snapshot_skew <= 15
+                    and exchange_skew is not None
+                    and exchange_skew <= 15
                 )
+                if not timestamps_verified:
+                    market_data_status = "رد سیگنال: مهر زمانی سمت صرافی برای هر دو دفتر موجود نیست"
+                elif freshness_ok and snapshot_ok and net_profit > 0:
+                    market_data_status = "داده بازار مناسب شبیه‌سازی"
+                else:
+                    market_data_status = "نیازمند بررسی داده/زمان"
                 # Ticker equality is not proof of identical underlying asset or transfer network.
                 # No authenticated, exchange-specific deposit/withdraw/network status is queried here.
                 validation_status = (
