@@ -42,6 +42,8 @@ jobs:
       matrix:
         runner: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.runner }}
+    env:
+      PYTHONIOENCODING: utf-8
     continue-on-error: true
     timeout-minutes: 4
     steps:
@@ -51,6 +53,10 @@ jobs:
           python-version: "3.12"
       - name: Install MVP dependencies
         run: pip install -r arbitrage_mvp/requirements.txt
+      - name: Probe documented Wallex Hector markets endpoint (read-only)
+        working-directory: arbitrage_mvp
+        shell: bash
+        run: python wallex_hector_probe.py
       - name: Diagnose public Wallex Engine.IO handshake
         working-directory: arbitrage_mvp
         shell: bash
