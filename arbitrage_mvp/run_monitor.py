@@ -26,6 +26,23 @@ def build_report(scan_id: int, result: dict, potential: dict | None = None) -> s
     missing_time = sum(1 for item in opportunities if not item.get("freshness_verified"))
     if missing_time:
         lines.append(f"⛔ {missing_time} مسیر به‌علت نبود timestamp معتبر سمت صرافی رد شد.")
+    accepted = [
+        item for item in opportunities
+        if item.get("eligible") is True and item.get("freshness_verified") is True
+    ]
+    if accepted:
+        lines.append("فرصت‌های تأییدشده برای بررسی در paper:")
+        for item in sorted(
+            accepted, key=lambda row: row.get("estimated_net_profit_toman", 0),
+            reverse=True
+        )[:3]:
+            lines.append(
+                f"• {item.get('symbol', 'نامشخص')}: خرید {item.get('buy_exchange', 'نامشخص')} / "
+                f"فروش {item.get('sell_exchange', 'نامشخص')} | "
+                f"{item.get('estimated_net_profit_toman', 0):,.0f} تومان"
+            )
+    else:
+        lines.append("در این اسکن هیچ سیگنال قابل‌تأییدی برای معامله وجود ندارد.")
     if result.get("errors"):
         lines.append("خطاهای اسکن تأییدی:")
         lines.extend(f"• {str(error)[:180]}" for error in result["errors"][:2])
