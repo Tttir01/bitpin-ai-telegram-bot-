@@ -25,7 +25,8 @@ python run_scan.py
 - طبق مستندات رسمی نوبیتکس، قیمت بازارهای ریالی در API بر حسب **ریال** است؛ بنابراین قیمت دفتر سفارش `IRT` برای مقایسه با قیمت تومان والکس باید بر ۱۰ تقسیم شود. مقدار پیش‌فرض `NOBITEX_IRT_PRICE_DIVISOR=10` همین تبدیل را انجام می‌دهد. منبع: https://github.com/nobitex/docs-api/blob/master/source/includes/_market_trade.md
 - والکس بازارهای تومانی را با نمادهایی مانند `USDTTMN` منتشر می‌کند؛ `TMN` در اطلاعات دارایی والکس به تومان اشاره دارد. منبع: https://api-docs.wallex.ir/
 - مستندات REST والکس برای `/v2/depth/all` زمان به‌روزرسانی هر دفتر سفارش را در ساختار پاسخ نمونه مشخص نمی‌کند. در نتیجه اسکنر فعلی زمان محلی دریافت را به‌جای زمان بازار نمی‌گذارد و فرصت فاقد timestamp معتبر را رد می‌کند.
-- مستندات والکس کانال‌های زنده Socket.IO برای عمق خرید و فروش را معرفی می‌کند. مرحله بعدی برای استفاده از داده والکس باید دریافت زنده، نگهداری snapshot و کنترل اتصال/بازاتصال را جداگانه پیاده‌سازی و آزمایش کند؛ تا آن زمان هیچ سیگنال قابل‌قبولی با REST فعلی انتظار نمی‌رود.
+- مستندات جدید والکس، پروتکل قدیمی Socket.IO/Engine.IO را برای پیاده‌سازی جدید کنار گذاشته و **Centrifugo** را معرفی می‌کند: `wss://api.wallex.ir/connection/websocket` با کانال‌های `orderbook:SYMBOL@buyDepth` و `orderbook:SYMBOL@sellDepth`. برای داده عمومی API Key لازم نیست.
+- هر publication عمق بازار یک snapshot کامل است، اما عضویت در کانال snapshot اولیه نمی‌دهد. کانال عمق بازار تاریخچه، `offset`، sequence ID و timestamp سمت صرافی ندارد؛ پیام‌های ازدست‌رفته در زمان قطع اتصال نیز بازیابی نمی‌شوند. بنابراین حتی با اتصال موفق، timestamp دریافت محلی فقط زمان دریافت کلاینت است و برای تأیید هم‌زمانی بین صرافی‌ها کافی نیست.
 - زمان سمت سرور نوبیتکس از `lastUpdate` خوانده می‌شود؛ اگر زمان وجود نداشته باشد یا قدیمی باشد، سیگنال رد می‌شود.
 
 ## تنظیمات حساس
@@ -49,17 +50,28 @@ python run_scan.py
 python wallex_depth_metadata_probe.py
 ```
 
-## آزمایش جریان زنده والکس (تشخیصی، نه سیگنال)
-مستندات رسمی والکس کانال‌های `SYMBOL@sellDepth` و `SYMBOL@buyDepth` را از رویداد `Broadcaster` معرفی می‌کند. کلاینت Socket.IO نسخه 2.5.x در مستندات مثال زده شده است؛ این MVP از کلاینت Python سازگار با پروتکل Socket.IO v2 استفاده می‌کند.
+## آزمایش جریان زنده والکس (Centrifugo؛ تشخیصی، نه سیگنال)
 
-پس از نصب وابستگی‌ها:
+مستندات فعلی:
+- اتصال: `wss://api.wallex.ir/connection/websocket`
+- کانال خرید: `orderbook:SYMBOL@buyDepth`
+- کانال فروش: `orderbook:SYMBOL@sellDepth`
+- پیام نخست `connect` است؛ سپس برای هر کانال `subscribe` جداگانه ارسال می‌شود.
+- در کلاینت بدون SDK باید هر ۲۵ ثانیه به پیام ping خالی `{}` با همان `{}` پاسخ داد.
+- برای کانال‌های عمق، پاسخ subscribe خالی است و snapshot اولیه ندارد. publicationهای بعدی snapshot کامل‌اند اما timestamp و offset ندارند.
+
+اجرای probe فقط‌خواندنی:
 ```bash
-python run_wallex_stream.py --wait 8
+python wallex_centrifugo_probe.py
 ```
 
-در اجرای تشخیصی GitHub Actions در ۲۰۲۶-۱۱-۲۰، endpoint وب‌سوکت والکس برای handshake با HTTP 503 از سمت Nginx پاسخ داد؛ بنابراین اتصال زنده هنوز تأیید نشده و این مسیر فعلاً عملیاتی محسوب نمی‌شود. این ابزار فقط تعداد بازارها و snapshotهای دریافت‌شده را گزارش می‌کند. زمان دریافت محلی را ثبت می‌کند، اما چون نمونه پیام عمق والکس timestamp سمت سرور ندارد، آن را timestamp صرافی جا نمی‌زند. خروجی این ابزار هنوز به اسکنر سود متصل نشده و به‌تنهایی فرصت آربیتراژ معتبر تولید نمی‌کند. اسکنر اصلی همچنان تا زمان داشتن شواهد کافی، داده فاقد زمان بازار را رد می‌کند.
+اسکریپت `wallex_centrifugo_probe.py` فقط handshake، عضویت، دریافت publication و وجود احتمالی فیلدهای زمان/توالی را گزارش می‌کند. به scanner و شرط پذیرش سیگنال متصل نیست. تست‌های قبلی Socket.IO/Engine.IO در CI صرفاً برای ثبت نتیجه مسیر قدیمی باقی مانده‌اند و مسیر مستند جدید نیستند.
 
-منبع رسمی: https://api-docs.wallex.ir/ (بخش وب‌سوکت / سفارش‌های فعال)
+منابع رسمی:
+- https://developers.wallex.ir/docs/socket-intro
+- https://developers.wallex.ir/docs/socket-raw-protocol
+- https://developers.wallex.ir/docs/socket-buy-depth
+- https://developers.wallex.ir/docs/socket-sell-depth
 
 ## پایش خودکار و گزارش تلگرام
 - گردش‌کار `.github/workflows/arbitrage-monitor.yml` علاوه بر پایشگر قبلی، job مستقل `read-only-mvp` را اجرا می‌کند.
