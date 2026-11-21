@@ -57,7 +57,7 @@ jobs:
         working-directory: arbitrage_mvp
         shell: bash
         run: python wallex_hector_probe.py
-      - name: Diagnose public Wallex Engine.IO handshake
+      - name: Diagnose public Wallex Engine.IO polling handshake
         working-directory: arbitrage_mvp
         shell: bash
         run: |
@@ -70,11 +70,15 @@ jobs:
                       params={"EIO": version, "transport": "polling"},
                       timeout=10,
                   )
-                  print(f"Engine.IO v{version}: HTTP {response.status_code}; "
+                  print(f"Engine.IO v{version} polling: HTTP {response.status_code}; "
                         f"body={response.text[:240]!r}")
               except requests.RequestException as exc:
-                  print(f"Engine.IO v{version}: {type(exc).__name__}: {exc}")
+                  print(f"Engine.IO v{version} polling: {type(exc).__name__}: {exc}")
           PY
+      - name: Probe direct documented WebSocket transport (read-only)
+        working-directory: arbitrage_mvp
+        shell: bash
+        run: python wallex_websocket_probe.py
       - name: Connect to public Wallex depth stream (read-only)
         working-directory: arbitrage_mvp
         shell: bash
