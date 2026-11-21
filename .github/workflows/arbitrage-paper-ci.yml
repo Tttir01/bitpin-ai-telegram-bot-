@@ -35,7 +35,7 @@ jobs:
         run: python -m unittest -v test_risk_gates.py test_monitor.py test_monitor_entrypoint.py test_account_readonly.py test_scanner.py
 
   wallex-live-diagnostic:
-    name: Wallex live Socket.IO diagnostic (non-blocking)
+    name: Wallex live Socket.IO and REST metadata diagnostic (non-blocking)
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
@@ -57,6 +57,10 @@ jobs:
         working-directory: arbitrage_mvp
         shell: bash
         run: python wallex_hector_probe.py
+      - name: Inspect REST depth timestamp metadata and HTTP Date (read-only)
+        working-directory: arbitrage_mvp
+        shell: bash
+        run: python wallex_depth_metadata_probe.py
       - name: Diagnose public Wallex Engine.IO polling handshake
         working-directory: arbitrage_mvp
         shell: bash
