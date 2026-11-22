@@ -1,8 +1,7 @@
-"""SQLite persistence for the staged ten-run Wallex validation.
+"""SQLite persistence and safe JSON recovery for Wallex validation runs.
 
-The database survives browser refreshes and Streamlit reruns. On Render Free,
-the local filesystem is ephemeral, so a service restart/redeploy can still
-remove this database unless a persistent disk or external database is configured.
+Render Free local storage is ephemeral. Exported JSON reports can be imported
+again after a restart/redeploy. Safety flags intentionally remain disabled.
 """
 import json
 import os
@@ -67,6 +66,67 @@ def save_run(run, db_path=None):
             ),
         )
         connection.commit()
+
+
+def import_runs_json(raw_json, db_path=None):
+    """Import an exported report without overwriting conflicting run numbers."""
+    if isinstance(raw_json, bytes):
+        raw_json = raw_json.decode("utf-8-sig")
+    document = json.loads(raw_json) if isinstance(raw_json, str) else raw_json
+    incoming = document.get("runs") if isinstance(document, dict) else None
+    if not isinstance(incoming, list):
+        raise ValueError("ساختار فایل معتبر نیست؛ آرایه runs در گزارش پیدا نشد.")
+    if not incoming:
+        raise ValueError("فایل گزارش هیچ آزمایشی ندارد.")
+
+    valid = []
+    seen = set()
+    for item in incoming:
+        if not isinstance(item, dict):
+            raise ValueError("یکی از رکوردهای آزمایش ساختار معتبری ندارد.")
+        try:
+            number = int(item["run_number"])
+        except (KeyError, TypeError, ValueError):
+            raise ValueError("هر آزمایش باید run_number معتبر داشته باشد.")
+        if number < 1 or number > len(GAP_SCHEDULE):
+            raise ValueError(f"شماره آزمایش {number} خارج از بازه ۱ تا ۱۰ است.")
+        if number in seen:
+            raise ValueError(f"شماره آزمایش {number} در خود فایل تکراری است.")
+        seen.add(number)
+        gap = item.get("gap_seconds")
+        if gap is not None and int(gap) != GAP_SCHEDULE[number - 1]:
+            raise ValueError(f"وقفه آزمایش {number} با برنامه ده‌مرحله‌ای مطابقت ندارد.")
+        clean = dict(item)
+        clean["run_number"] = number
+        clean.setdefault("recorded_at_utc", "imported_without_timestamp")
+        clean.setdefault("status", "failed")
+        valid.append(clean)
+
+    imported = skipped = conflicts = 0
+    with _connect(db_path) as connection:
+        for item in sorted(valid, key=lambda row: row["run_number"]):
+            number = item["run_number"]
+            existing = connection.execute(
+                "SELECT payload_json FROM wallex_validation_runs WHERE run_number = ?",
+                (number,),
+            ).fetchone()
+            payload = json.dumps(item, ensure_ascii=False, separators=(",", ":"))
+            if existing:
+                if json.loads(existing[0]) == item:
+                    skipped += 1
+                else:
+                    conflicts += 1
+                continue
+            connection.execute(
+                """INSERT INTO wallex_validation_runs
+                   (run_number, recorded_at_utc, gap_seconds, status, payload_json)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (number, str(item.get("recorded_at_utc", "")),
+                 item.get("gap_seconds"), str(item.get("status", "failed")), payload),
+            )
+            imported += 1
+        connection.commit()
+    return {"imported": imported, "skipped": skipped, "conflicts": conflicts}
 
 
 def clear_runs(db_path=None):
