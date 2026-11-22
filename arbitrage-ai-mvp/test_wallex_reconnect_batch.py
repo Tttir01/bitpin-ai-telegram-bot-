@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -5,6 +6,7 @@ from pathlib import Path
 from wallex_reconnect_batch import (
     GAP_SCHEDULE,
     clear_runs,
+    import_runs_json,
     load_runs,
     next_gap_seconds,
     save_run,
@@ -57,6 +59,38 @@ class WallexReconnectBatchTests(unittest.TestCase):
             }
             save_run(sample, database)
             self.assertEqual(load_runs(database), [sample])
+
+    def test_json_report_import_restores_runs_and_skips_identical_duplicates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = str(Path(directory) / "validation.sqlite3")
+            run = {"run_number": 1, "recorded_at_utc": "2026-11-22T12:00:00+00:00",
+                   "gap_seconds": 2, "status": "failed"}
+            report = json.dumps({"summary": {}, "runs": [run]})
+            first = import_runs_json(report, database)
+            second = import_runs_json(report, database)
+            self.assertEqual(first, {"imported": 1, "skipped": 0, "conflicts": 0})
+            self.assertEqual(second, {"imported": 0, "skipped": 1, "conflicts": 0})
+            self.assertEqual(load_runs(database), [run])
+
+    def test_json_import_does_not_overwrite_conflicting_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = str(Path(directory) / "validation.sqlite3")
+            original = {"run_number": 1, "gap_seconds": 2, "status": "failed"}
+            changed = {"run_number": 1, "gap_seconds": 2, "status": "candidate"}
+            save_run(original, database)
+            result = import_runs_json({"runs": [changed]}, database)
+            self.assertEqual(result, {"imported": 0, "skipped": 0, "conflicts": 1})
+            self.assertEqual(load_runs(database), [original])
+
+    def test_json_import_rejects_wrong_gap_schedule(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = str(Path(directory) / "validation.sqlite3")
+            with self.assertRaises(ValueError):
+                import_runs_json({"runs": [{"run_number": 1, "gap_seconds": 5}]}, database)
+
+    def test_json_import_requires_runs_array(self):
+        with self.assertRaises(ValueError):
+            import_runs_json({"summary": {}})
 
     def test_clear_runs_removes_saved_results(self):
         with tempfile.TemporaryDirectory() as directory:
