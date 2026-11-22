@@ -56,14 +56,47 @@ with st.expander("🧪 آزمایش اتصال زندهٔ والکس از سرو
             status = getattr(getattr(error, "response", None), "status_code", "network")
             st.error(f"REST عمومی والکس ناموفق: {type(error).__name__}؛ وضعیت {status}.")
 
+        # Socket.IO v2.x uses Engine.IO protocol 3. Probe the public handshake
+        # independently so network/protocol failures are distinguishable.
+        import io
+        import logging
+        import time
+        import socketio
+
+        for eio_version in (3, 4):
+            try:
+                probe = requests.get(
+                    "https://api.wallex.ir/socket.io/",
+                    params={"EIO": str(eio_version), "transport": "polling", "t": str(int(time.time() * 1000))},
+                    headers={"Accept": "*/*", "User-Agent": "ArbitrageMVP-ReadOnly/1.0"},
+                    timeout=(5, 10),
+                )
+                body_preview = " ".join(probe.text[:180].split())
+                st.write(
+                    f"Handshake Engine.IO {eio_version}: HTTP {probe.status_code} | "
+                    f"{body_preview or '(بدون بدنه)'}"
+                )
+            except requests.RequestException as error:
+                st.write(f"Handshake Engine.IO {eio_version}: {type(error).__name__}: {str(error)[:160]}")
+
         received_channels = set()
-        client = socketio.Client(reconnection=False, logger=False, engineio_logger=False)
+        client = socketio.Client(reconnection=False, logger=True, engineio_logger=True)
 
         @client.on("Broadcaster")
         def _wallex_broadcaster(channel, data):
             if channel in ("USDTTMN@buyDepth", "USDTTMN@sellDepth") and isinstance(data, (dict, list)) and data:
                 received_channels.add(channel)
 
+        engineio_logger = logging.getLogger("engineio.client")
+        socketio_logger = logging.getLogger("socketio.client")
+        log_stream = io.StringIO()
+        log_handler = logging.StreamHandler(log_stream)
+        previous_engineio_level = engineio_logger.level
+        previous_socketio_level = socketio_logger.level
+        engineio_logger.addHandler(log_handler)
+        socketio_logger.addHandler(log_handler)
+        engineio_logger.setLevel(logging.DEBUG)
+        socketio_logger.setLevel(logging.DEBUG)
         try:
             client.connect(
                 "https://api.wallex.ir",
@@ -85,9 +118,16 @@ with st.expander("🧪 آزمایش اتصال زندهٔ والکس از سرو
                 )
         except Exception as error:
             st.error(
-                f"اتصال Socket.IO از سرور Render ناموفق بود: {type(error).__name__}: {str(error)[:220]}"
+                f"اتصال Socket.IO ناموفق بود: {type(error).__name__}: {str(error)[:220]}"
             )
+            diagnostic_log = log_stream.getvalue().strip()
+            if diagnostic_log:
+                st.code("\\n".join(diagnostic_log.splitlines()[-12:]), language="text")
         finally:
+            engineio_logger.removeHandler(log_handler)
+            socketio_logger.removeHandler(log_handler)
+            engineio_logger.setLevel(previous_engineio_level)
+            socketio_logger.setLevel(previous_socketio_level)
             if client.connected:
                 client.disconnect()
 
