@@ -23,6 +23,14 @@ st.markdown(
 )
 st.title("📈 هوش مصنوعی آربیتراژ")
 
+st.page_link(
+    "pages/2_wallex_10_run_validation.py",
+    label="🧭 ورود به اعتبارسنجی ده‌مرحله‌ای همگرایی والکس",
+    icon="🧭",
+    help="اجرای ۱۰ آزمایش مستقل و فقط‌خواندنی؛ هر بار یک آزمایش",
+)
+st.caption("در این بخش هر ۱۰ آزمایش را جداگانه اجرا کنید؛ نتایج در نشست فعلی نگه داشته می‌شوند.")
+
 # Diagnostic runs only when requested by the dashboard user. It never accesses private APIs.
 with st.expander("🧪 آزمایش اتصال زندهٔ والکس از سرور Render", expanded=False):
     st.caption(
