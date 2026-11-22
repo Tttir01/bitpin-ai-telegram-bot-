@@ -7,6 +7,7 @@ import streamlit as st
 from wallex_reconnect_batch import (
     GAP_SCHEDULE,
     clear_runs,
+    import_runs_json,
     load_runs,
     next_gap_seconds,
     save_run,
@@ -20,13 +21,12 @@ st.title("🧭 اعتبارسنجی ده‌مرحله‌ای همگرایی وا
 st.caption("این صفحه مستقل از اسکنر و سبد معاملات کاغذی است و فقط API عمومی REST و Centrifugo را می‌خواند.")
 
 st.warning(
-    "هر بار فقط یک آزمایش اجرا می‌شود. نتیجه هر آزمایش بلافاصله در SQLite ذخیره می‌شود "
-    "و با تازه‌سازی صفحه یا اجرای دوباره برنامه باقی می‌ماند."
+    "هر بار فقط یک آزمایش اجرا می‌شود. سوابق در SQLite محلی ذخیره می‌شوند؛ "
+    "در Render رایگان ممکن است پس از راه‌اندازی مجدد یا انتشار نسخه پاک شوند."
 )
 st.info(
-    "توجه: فضای دیسک سرویس رایگان Render موقتی است؛ داده‌ها با تازه‌سازی صفحه حفظ می‌شوند، "
-    "اما ممکن است با راه‌اندازی مجدد یا انتشار نسخه جدید سرویس پاک شوند. پس از هر آزمایش، "
-    "گزارش JSON را نیز دریافت و در گوشی نگهداری کنید."
+    "برای بازیابی سابقه پس از انتشار نسخه، فایل JSON گزارش قبلی را از گوشی انتخاب و وارد کنید. "
+    "می‌توانید چند فایل را یکی‌یکی وارد کنید؛ رکوردهای تکراری نادیده گرفته می‌شوند و رکورد متعارض جایگزین نمی‌شود."
 )
 
 try:
@@ -34,6 +34,28 @@ try:
 except Exception as exc:
     st.error(f"خواندن پایگاه داده نتایج ناموفق بود: {exc}")
     st.stop()
+
+st.subheader("بازیابی سوابق از فایل JSON")
+uploaded_report = st.file_uploader(
+    "فایل wallex_reconnect_10_run_report.json را انتخاب کنید",
+    type=["json"],
+    key="wallex_history_restore_upload",
+)
+if st.button("بازیابی و ادغام سوابق فایل", disabled=uploaded_report is None, key="restore_wallex_history"):
+    try:
+        restore_result = import_runs_json(uploaded_report.getvalue())
+        st.success(
+            f"بازیابی انجام شد: {restore_result['imported']} رکورد اضافه شد؛ "
+            f"{restore_result['skipped']} رکورد تکراری بود؛ "
+            f"{restore_result['conflicts']} مورد تعارض داشت و تغییر داده نشد."
+        )
+        if restore_result["conflicts"]:
+            st.warning("برای شماره‌های متعارض، سابقه موجود حفظ شد. فایل گزارش را نگه دارید تا مورد بررسی شود.")
+        st.rerun()
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        st.error(f"فایل وارد نشد: {exc}")
+    except Exception as exc:
+        st.error(f"خطا هنگام بازیابی سوابق: {exc}")
 
 summary = summarize_runs(runs)
 progress = min(summary["total"], len(GAP_SCHEDULE))
@@ -45,10 +67,22 @@ m2.metric("همگرایی کاندید", summary["candidate"])
 m3.metric("ناموفق/ناکافی", summary["failed"])
 m4.metric("نرخ کاندید", f"{summary['candidate_rate_pct']:.1f}%")
 
+restored_first_two = {int(item.get("run_number", 0)) for item in runs}.issuperset({1, 2})
+if not restored_first_two:
+    st.warning(
+        "برای جلوگیری از جابه‌جایی شماره‌ها، اجرای آزمایش جدید تا زمان بازیابی آزمایش‌های ۱ و ۲ غیرفعال است. "
+        "گزارش‌های قبلی را از گوشی وارد کنید."
+    )
+
 if progress < len(GAP_SCHEDULE):
     gap = next_gap_seconds(progress)
     st.info(f"آزمایش بعدی با وقفه عمدی {gap} ثانیه اجرا می‌شود. برنامه وقفه‌ها: ۲، ۵ و ۱۰ ثانیه، در مجموع ۱۰ بار.")
-    if st.button(f"اجرای آزمایش شماره {progress + 1} (وقفه {gap} ثانیه)", type="primary", key="run_next_wallex_batch"):
+    if st.button(
+        f"اجرای آزمایش شماره {progress + 1} (وقفه {gap} ثانیه)",
+        type="primary",
+        key="run_next_wallex_batch",
+        disabled=not restored_first_two,
+    ):
         with st.spinner("در حال دریافت REST، قطع کنترل‌شده و اتصال مجدد Centrifugo..."):
             try:
                 result = run_rest_reconnect_convergence(gap_seconds=gap, wait_seconds=8)
@@ -108,7 +142,8 @@ st.divider()
 st.caption(
     "معیار کاندید هر آزمایش: اولین پیام معتبر پس از اتصال مجدد با snapshot جدید REST "
     "در آستانه اختلاف قیمت حداکثر ۰٫۱۰٪ و اختلاف حجم حداکثر ۲۰٪ باشد. "
-    "این نتیجه replay پیام‌های ازدست‌رفته، ترتیب کامل رویدادها، timestamp معتبر سمت صرافی یا snapshot بودن publication را اثبات نمی‌کند."
+    "نمونه‌های publication دریافتی نیز در تشخیص جدید ثبت می‌شوند، اما این نتیجه replay پیام‌های ازدست‌رفته، "
+    "ترتیب کامل رویدادها، timestamp معتبر سمت صرافی یا snapshot بودن publication را اثبات نمی‌کند."
 )
 st.error(
     "قفل‌های ایمنی ثابت‌اند: scanner_feed_enabled=false، execution_allowed=false، "
