@@ -69,7 +69,6 @@ with st.expander("🧪 آزمایش اتصال زندهٔ والکس از سرو
                 "https://api.wallex.ir",
                 transports=["websocket"],
                 socketio_path="socket.io",
-                wait_timeout=10,
             )
             st.success("اتصال Socket.IO برقرار شد.")
             client.emit("subscribe", {"channel": "USDTTMN@buyDepth"})
