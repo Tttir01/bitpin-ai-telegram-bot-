@@ -57,6 +57,46 @@ class NormalizationTests(unittest.TestCase):
 
 
 
+class PotentialRouteTests(unittest.TestCase):
+    @patch("scanner.nobitex_books")
+    @patch("scanner.wallex_books")
+    def test_top_of_book_potentials_are_separate_and_never_execution_ready(
+        self, mock_wallex, mock_nobitex
+    ):
+        received = time.time()
+        mock_wallex.return_value = {
+            "BTC/IRT": {
+                "asks": [(100.0, 1.0)], "bids": [(99.0, 1.0)],
+                "updated_at": None, "received_at": received,
+                "latency_ms": 10, "source": "Wallex",
+            }
+        }
+        mock_nobitex.return_value = {
+            "BTC/IRT": {
+                "asks": [(110.0, 1.0)], "bids": [(109.0, 1.0)],
+                "updated_at": received, "received_at": received,
+                "latency_ms": 10, "source": "Nobitex",
+            }
+        }
+        result = scan_markets(
+            fee_local=0, fee_global=0, slippage_pct=0,
+            transfer_cost_pct=0, capital_toman=100000,
+        )
+        self.assertEqual(len(result["potential_opportunities"]), 2)
+        route = next(
+            item for item in result["potential_opportunities"]
+            if item["buy_exchange"] == "Wallex"
+        )
+        self.assertGreater(route["estimated_net_top_pct"], 0)
+        self.assertFalse(route["execution_allowed"])
+        self.assertIn("تأیید نشده", route["diagnostic_status"])
+        self.assertTrue(result["opportunities"])
+        self.assertTrue(all(
+            item["market_data_status"] != "داده بازار مناسب شبیه‌سازی"
+            for item in result["opportunities"]
+        ))
+
+
 class FreshnessGateTests(unittest.TestCase):
     @patch("scanner.nobitex_books")
     @patch("scanner.wallex_books")
