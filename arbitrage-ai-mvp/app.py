@@ -137,6 +137,48 @@ with st.expander("🧪 آزمایش اتصال زندهٔ والکس از سرو
             "این داده‌ها به سیگنال واجد شرایط تبدیل نمی‌شوند."
         )
 
+# Independent multi-sample depth validation. It is isolated from scanner and paper pipeline.
+with st.expander("🔎 اعتبارسنج مستقل چندنمونه‌ای عمق والکس (بدون اتصال به اسکنر)", expanded=False):
+    st.caption(
+        "در این آزمون، پیام‌های متوالی هر دو کانال بین دو snapshot عمومی REST ثبت می‌شوند. "
+        "زمان‌ها محلی‌اند؛ نتیجه candidate فقط نشانه تطبیق تقریبی است، نه تأیید snapshot یا مجوز معامله."
+    )
+    if st.button("اجرای اعتبارسنج ۲۰ ثانیه‌ای والکس", key="wallex_depth_validator"):
+        try:
+            from wallex_depth_validator import run_depth_validation
+            with st.spinner("ثبت پیام‌های متوالی و مقایسه با REST قبل و بعد..."):
+                validation = run_depth_validation(wait_seconds=20, min_messages=10)
+            status = validation.get("status", "failed")
+            if status == "candidate":
+                st.success("نتیجه تشخیصی: candidate؛ هنوز برای استفاده معاملاتی تأیید نشده است.")
+            else:
+                st.error("اعتبارسنجی ناموفق یا ناکافی بود؛ داده والکس قابل اعتماد تلقی نمی‌شود.")
+            if validation.get("error"):
+                st.warning(validation["error"])
+            st.write(f"اشتراک کانال‌ها: {validation.get('subscribe_acks', 0)} از ۲")
+            for side, title in (("bid", "خرید"), ("ask", "فروش")):
+                item = validation.get("sides", {}).get(side, {})
+                st.markdown(f"**کانال {title}**")
+                st.json({
+                    "تعداد پیام": item.get("sample_count", 0),
+                    "تعداد سطوح (کمینه/بیشینه)": [item.get("min_levels"), item.get("max_levels")],
+                    "نمونه اول": item.get("first"),
+                    "نمونه آخر": item.get("last"),
+                    "تغییر بهترین قیمت": item.get("top_price_changes"),
+                    "تغییر حجم بهترین قیمت": item.get("top_quantity_changes"),
+                    "اختلاف قیمت با نزدیک‌ترین REST (%)": item.get("rest_best_price_diff_pct"),
+                    "اختلاف حجم با نزدیک‌ترین REST (%)": item.get("rest_best_quantity_diff_pct"),
+                    "فیلدهای timestamp/sequence مشاهده‌شده": item.get("timestamp_or_sequence_fields_seen", []),
+                    "نتیجه سمت": item.get("status"),
+                })
+            st.info(validation.get("interpretation", "این آزمون صرفاً تشخیصی است."))
+            st.caption(
+                "کنترل ایمنی: scanner_feed_enabled=false و execution_allowed=false؛ "
+                "هیچ داده‌ای به اسکنر یا معاملات کاغذی فرستاده نمی‌شود."
+            )
+        except Exception as error:
+            st.error(f"اجرای اعتبارسنج با خطا متوقف شد: {type(error).__name__}: {str(error)[:220]}")
+
 # Independent REST/Centrifugo parity check. Results never feed the scanner.
 with st.expander("🧪 تطبیق دفتر سفارش REST و Centrifugo والکس (فقط‌خواندنی)", expanded=False):
     st.caption(
