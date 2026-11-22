@@ -98,6 +98,42 @@ with st.expander("🧪 آزمایش اتصال زندهٔ والکس از سرو
             "این داده‌ها به سیگنال واجد شرایط تبدیل نمی‌شوند."
         )
 
+# Separate, read-only diagnostic for the documented Centrifugo transport.
+with st.expander("🧪 آزمایش جریان Centrifugo والکس (فقط‌خواندنی)", expanded=False):
+    st.caption(
+        "این تست مستقل از اسکنر است و snapshotها را وارد محاسبه سود یا شمارنده پایداری نمی‌کند. "
+        "دریافت پیام به معنی همگام‌سازی REST/WebSocket یا مجوز معامله نیست."
+    )
+    if st.button("آزمایش Centrifugo والکس", key="wallex_centrifugo_diagnostic"):
+        try:
+            from wallex_centrifugo_diagnostic import run_diagnostic
+            with st.spinner("در حال اتصال به جریان عمومی والکس..."):
+                diagnostic = run_diagnostic(wait_seconds=10)
+            if diagnostic.get("connected"):
+                st.success("Handshake اتصال Centrifugo موفق بود.")
+            else:
+                st.error(f"Handshake ناموفق بود: {diagnostic.get('error', 'پاسخ دریافت نشد')}")
+            st.write(f"تأیید اشتراک: {diagnostic.get('subscribe_acks', 0)} از ۲")
+            st.write(f"تعداد پیام‌های عمق دریافت‌شده: {diagnostic.get('publications', 0)}")
+            st.write(
+                "کانال‌های دریافت‌شده: "
+                + (", ".join(diagnostic.get("received_channels", [])) or "هیچ‌کدام")
+            )
+            if diagnostic.get("both_depth_sides_received"):
+                st.success("از هر دو سمت خرید و فروش پیام دریافت شد.")
+            elif diagnostic.get("connected"):
+                st.warning("اتصال برقرار شد، اما دریافت هر دو سمت عمق تأیید نشد.")
+            if diagnostic.get("timestamp_fields"):
+                st.write("نام فیلدهای زمانی مشاهده‌شده: " + ", ".join(diagnostic["timestamp_fields"]))
+            else:
+                st.info("در پیام‌های مشاهده‌شده فیلد timestamp/sequence شناخته‌شده‌ای دیده نشد.")
+            st.warning(diagnostic.get(
+                "warning",
+                "این آزمایش فقط اتصال را بررسی می‌کند و مجوز سیگنال یا معامله نیست."
+            ))
+        except Exception as error:
+            st.error(f"آزمایش Centrifugo ناموفق بود: {type(error).__name__}: {str(error)[:180]}")
+
 st.caption("نسخه آزمایشی ۰.۹ | گزارش عملکرد معاملات کاغذی و تشخیص فرصت پایدار")
 st.warning(
     "این نسخه سفارش واقعی ثبت نمی‌کند. سودها برآورد شبیه‌سازی بر اساس سطوح قابل مشاهده دفتر سفارش هستند؛ "
@@ -317,6 +353,53 @@ b.metric("دفتر سفارش والکس", str(diagnostics.get("wallex_books", "
 c.metric("دفتر سفارش نوبیتکس", str(diagnostics.get("nobitex_books", "—")))
 d.metric("جفت‌ارز مشترک", str(diagnostics.get("common_symbols", "—")))
 
+# Layer 1: raw top-of-book price differences. This is not a trade signal.
+potential_df = pd.DataFrame(result.get("potential_opportunities", []))
+st.subheader("۱) اختلاف خام بهترین قیمت‌ها")
+if not potential_df.empty:
+    potential_view = potential_df.head(20).rename(columns={
+        "symbol": "جفت‌ارز",
+        "buy_exchange": "محل خرید احتمالی",
+        "sell_exchange": "محل فروش احتمالی",
+        "best_ask_toman": "بهترین فروشنده خرید (تومان)",
+        "best_bid_toman": "بهترین خریدار فروش (تومان)",
+        "gross_spread_pct": "اختلاف خام (%)",
+        "estimated_net_top_pct": "برآورد پس از هزینه‌ها (%)",
+        "diagnostic_status": "وضعیت",
+    })
+    st.dataframe(
+        potential_view[[
+            "جفت‌ارز", "محل خرید احتمالی", "محل فروش احتمالی",
+            "بهترین فروشنده خرید (تومان)", "بهترین خریدار فروش (تومان)",
+            "اختلاف خام (%)", "برآورد پس از هزینه‌ها (%)", "وضعیت",
+        ]],
+        hide_index=True, use_container_width=True,
+    )
+else:
+    st.info("برای بازارهای تومانی مشترک، اختلاف خام بهترین قیمت قابل محاسبه نبود.")
+
+# Layer 2: full depth-aware calculations, including rows rejected by freshness gates.
+depth_all_df = pd.DataFrame(result.get("opportunities", []))
+st.subheader("۲) بررسی عمق، هزینه و کیفیت داده")
+if not depth_all_df.empty:
+    depth_columns = [
+        "symbol", "buy_exchange", "sell_exchange", "net_spread_pct",
+        "profit_toman", "depth_coverage_pct", "market_data_status",
+    ]
+    depth_view = depth_all_df[[c for c in depth_columns if c in depth_all_df.columns]].head(20).rename(columns={
+        "symbol": "جفت‌ارز",
+        "buy_exchange": "خرید",
+        "sell_exchange": "فروش",
+        "net_spread_pct": "بازده خالص برآوردی (%)",
+        "profit_toman": "سود خالص برآوردی (تومان)",
+        "depth_coverage_pct": "پوشش عمق (%)",
+        "market_data_status": "وضعیت کیفیت داده",
+    })
+    st.dataframe(depth_view, hide_index=True, use_container_width=True)
+else:
+    st.info("با حجم و سرمایه فعلی، محاسبه کامل عمق برای مسیر مشترک انجام نشد.")
+
+# Layer 3: only rows that pass the existing conservative eligibility gates.
 df = pd.DataFrame(result.get("opportunities", []))
 if not df.empty:
     df = df[
