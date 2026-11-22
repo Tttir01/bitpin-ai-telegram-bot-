@@ -179,6 +179,40 @@ with st.expander("🔎 اعتبارسنج مستقل چندنمونه‌ای ع�
         except Exception as error:
             st.error(f"اجرای اعتبارسنج با خطا متوقف شد: {type(error).__name__}: {str(error)[:220]}")
 
+# Deliberate reconnect probe. It is isolated from scanner and paper pipeline.
+with st.expander("🔌 آزمون قطع و اتصال مجدد جریان والکس (فقط‌خواندنی)", expanded=False):
+    st.caption(
+        "اتصال اولیه عمداً بسته می‌شود؛ سپس اتصال و اشتراک هر دو کانال دوباره برقرار می‌شود. "
+        "دریافت پیام پس از اتصال مجدد، بازیابی شکاف پیام‌ها را ثابت نمی‌کند."
+    )
+    if st.button("اجرای آزمون قطع و اتصال مجدد", key="wallex_reconnect_probe"):
+        try:
+            from wallex_reconnect_diagnostic import run_reconnect_probe
+            with st.spinner("اتصال اولیه، قطع عمدی و اتصال مجدد در حال آزمایش است..."):
+                reconnect = run_reconnect_probe(wait_seconds=8)
+            if reconnect.get("status") == "candidate":
+                st.success("اتصال مجدد کاندیدا شد؛ بازیابی شکاف همچنان تأیید نشده است.")
+            else:
+                st.error("آزمون اتصال مجدد ناموفق یا ناکافی بود.")
+            for phase, title in (("before_disconnect", "پیش از قطع"), ("after_reconnect", "پس از اتصال مجدد")):
+                data = reconnect.get(phase, {})
+                st.markdown(f"**{title}**")
+                st.json({
+                    "اتصال": data.get("connected"),
+                    "تأیید اشتراک": data.get("subscribe_acks"),
+                    "تعداد پیام معتبر خرید/فروش": data.get("publication_counts"),
+                    "هر دو سمت دریافت شدند": data.get("both_sides_received"),
+                })
+            if reconnect.get("error"):
+                st.warning(reconnect["error"])
+            st.info(reconnect.get("interpretation", "این آزمون فقط تشخیصی است."))
+            st.caption(
+                "gap_recovery_verified=false | sequence_order_verified=false | "
+                "scanner_feed_enabled=false | execution_allowed=false"
+            )
+        except Exception as error:
+            st.error(f"آزمون اتصال مجدد متوقف شد: {type(error).__name__}: {str(error)[:180]}")
+
 # Independent REST/Centrifugo parity check. Results never feed the scanner.
 with st.expander("🧪 تطبیق دفتر سفارش REST و Centrifugo والکس (فقط‌خواندنی)", expanded=False):
     st.caption(
