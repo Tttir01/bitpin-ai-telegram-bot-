@@ -1,5 +1,15 @@
+import tempfile
 import unittest
-from wallex_reconnect_batch import GAP_SCHEDULE, next_gap_seconds, summarize_runs
+from pathlib import Path
+
+from wallex_reconnect_batch import (
+    GAP_SCHEDULE,
+    clear_runs,
+    load_runs,
+    next_gap_seconds,
+    save_run,
+    summarize_runs,
+)
 
 
 class WallexReconnectBatchTests(unittest.TestCase):
@@ -32,6 +42,28 @@ class WallexReconnectBatchTests(unittest.TestCase):
         self.assertEqual(result["ask_candidate"], 1)
         self.assertFalse(result["scanner_feed_enabled"])
         self.assertFalse(result["execution_allowed"])
+        self.assertFalse(result["gap_recovery_verified"])
+        self.assertFalse(result["sequence_order_verified"])
+
+    def test_runs_persist_after_database_reopen(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = str(Path(directory) / "validation.sqlite3")
+            sample = {
+                "run_number": 1,
+                "recorded_at_utc": "2026-11-22T12:00:00+00:00",
+                "gap_seconds": 2,
+                "status": "candidate",
+                "post_rest_ws_comparison": {"bid": {"status": "candidate"}},
+            }
+            save_run(sample, database)
+            self.assertEqual(load_runs(database), [sample])
+
+    def test_clear_runs_removes_saved_results(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = str(Path(directory) / "validation.sqlite3")
+            save_run({"run_number": 1, "status": "failed"}, database)
+            clear_runs(database)
+            self.assertEqual(load_runs(database), [])
 
 
 if __name__ == "__main__":
