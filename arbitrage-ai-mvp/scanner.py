@@ -238,6 +238,52 @@ def scan_markets(
     diagnostics["nobitex_books"] = len(nobitex)
     diagnostics["common_symbols"] = len(set(wallex) & set(nobitex))
 
+    # Top-of-book candidates are diagnostic only. They intentionally do not
+    # inherit depth/freshness eligibility from the full simulation below.
+    potential_opportunities = []
+    slippage = max(0.0, float(slippage_pct)) / 100
+    transfer = max(0.0, float(transfer_cost_pct)) / 100
+    fee_wallex = max(0.0, float(fee_local))
+    fee_nobitex = max(0.0, float(fee_global))
+    for symbol in sorted(set(wallex) & set(nobitex)):
+        if not symbol.endswith("/IRT"):
+            continue
+        for buy_name, buy_book, buy_fee in (
+            ("Wallex", wallex[symbol], fee_wallex),
+            ("Nobitex", nobitex[symbol], fee_nobitex),
+        ):
+            for sell_name, sell_book, sell_fee in (
+                ("Wallex", wallex[symbol], fee_wallex),
+                ("Nobitex", nobitex[symbol], fee_nobitex),
+            ):
+                if buy_name == sell_name:
+                    continue
+                best_ask = buy_book["asks"][0][0] if buy_book.get("asks") else 0
+                best_bid = sell_book["bids"][0][0] if sell_book.get("bids") else 0
+                if best_ask <= 0 or best_bid <= 0:
+                    continue
+                gross_pct = (best_bid / best_ask - 1) * 100
+                estimated_net_pct = (
+                    (best_bid * (1 - sell_fee) * (1 - slippage))
+                    / (best_ask * (1 + buy_fee) * (1 + slippage) * (1 + transfer))
+                    - 1
+                ) * 100
+                potential_opportunities.append({
+                    "symbol": symbol,
+                    "buy_exchange": buy_name,
+                    "sell_exchange": sell_name,
+                    "best_ask_toman": best_ask,
+                    "best_bid_toman": best_bid,
+                    "gross_spread_pct": round(gross_pct, 4),
+                    "estimated_net_top_pct": round(estimated_net_pct, 4),
+                    "diagnostic_status": "فقط اختلاف بهترین قیمت؛ عمق، تازگی و هم‌زمانی تأیید نشده",
+                    "execution_allowed": False,
+                })
+    potential_opportunities.sort(
+        key=lambda item: item["estimated_net_top_pct"], reverse=True
+    )
+    diagnostics["potential_routes"] = len(potential_opportunities)
+
     slippage = max(0.0, float(slippage_pct)) / 100
     transfer = max(0.0, float(transfer_cost_pct)) / 100
     fee_wallex = max(0.0, float(fee_local))
@@ -412,7 +458,7 @@ def scan_markets(
                 })
 
     opportunities.sort(key=lambda item: item["profit_toman"], reverse=True)
-    return {"opportunities": opportunities, "errors": errors, "diagnostics": diagnostics}
+    return {"opportunities": opportunities, "potential_opportunities": potential_opportunities, "errors": errors, "diagnostics": diagnostics}
 
 
 def read_wallex_balances(api_key=None):
