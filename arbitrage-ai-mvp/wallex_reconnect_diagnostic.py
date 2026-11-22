@@ -68,6 +68,15 @@ def _open_and_subscribe(websocket_module, phase, wait_seconds):
     }
 
 
+def _phase_ok(data):
+    return bool(
+        data.get("connected")
+        and data.get("subscribe_acks") == 2
+        and data.get("both_sides_received")
+        and all(int(data.get("publication_counts", {}).get(side, 0)) > 0 for side in ("bid", "ask"))
+    )
+
+
 def run_reconnect_probe(wait_seconds=8):
     """Observe, deliberately close, reconnect, then observe both public depth channels."""
     if not 3 <= int(wait_seconds) <= 20:
@@ -91,12 +100,7 @@ def run_reconnect_probe(wait_seconds=8):
         first = None
         result["intentional_disconnect_completed"] = True
         second, result["after_reconnect"] = _open_and_subscribe(websocket, "reconnect", int(wait_seconds))
-        passed = all(
-            result[phase]["connected"]
-            and result[phase]["subscribe_acks"] == 2
-            and result[phase]["both_sides_received"]
-            for phase in ("before_disconnect", "after_reconnect")
-        )
+        passed = all(_phase_ok(result[phase]) for phase in ("before_disconnect", "after_reconnect"))
         result["status"] = "candidate" if passed else "failed"
         result["interpretation"] = (
             "candidate فقط یعنی پس از قطع عمدی، اتصال و اشتراک دوباره برقرار شده و از هر دو سمت "
