@@ -20,6 +20,23 @@ TIMESTAMP_KEYS = {
 }
 
 
+def _timestamp_field_names(payload, depth=0):
+    """Find timestamp-like field names without treating them as trustworthy."""
+    if depth > 8:
+        return set()
+    found = set()
+    if isinstance(payload, dict):
+        found.update(key for key in payload if key in TIMESTAMP_KEYS)
+        for value in payload.values():
+            if isinstance(value, (dict, list)):
+                found.update(_timestamp_field_names(value, depth + 1))
+    elif isinstance(payload, list):
+        for value in payload[:100]:
+            if isinstance(value, (dict, list)):
+                found.update(_timestamp_field_names(value, depth + 1))
+    return found
+
+
 def inspect_frame(message):
     """Return a compact classification for one decoded Centrifugo frame."""
     if not isinstance(message, dict):
@@ -35,23 +52,24 @@ def inspect_frame(message):
     push = message.get("push")
     if isinstance(push, dict):
         channel = push.get("channel")
-        data = (push.get("pub") or {}).get("data")
+        publication = push.get("pub")
+        data = publication.get("data") if isinstance(publication, dict) else None
         if channel in CHANNELS and isinstance(data, (dict, list)):
-            keys = []
-            if isinstance(data, dict):
-                keys = [key for key in data if key in TIMESTAMP_KEYS]
-            elif data and isinstance(data[0], dict):
-                keys = [key for key in data[0] if key in TIMESTAMP_KEYS]
             side = "bid" if channel.endswith("@buyDepth") else "ask"
             levels = _extract_side_levels(data, side)
             return {
                 "kind": "publication",
                 "channel": channel,
                 "side": side,
-                "levels": len(data),
+                "levels": len(levels),
                 "top_price": levels[0][0] if levels else None,
                 "top_quantity": levels[0][1] if levels else None,
-                "timestamp_fields": keys,
+                "timestamp_fields": sorted(_timestamp_field_names(data)),
+                "payload_shape": (
+                    "numeric_keyed_map"
+                    if isinstance(data, dict) and data and all(str(key).isdigit() for key in data)
+                    else "list" if isinstance(data, list) else "object"
+                ),
             }
     return {"kind": "ignored"}
 
@@ -168,16 +186,34 @@ def _parse_level_list(value, side):
     return sorted(levels, key=lambda row: row[0], reverse=(side == "bid"))
 
 
+def _parse_numeric_level_mapping(value, side):
+    """Parse Wallex depth maps whose numeric keys contain {price, quantity} rows."""
+    if not isinstance(value, dict) or not value:
+        return []
+    if not all(str(key).isdigit() for key in value):
+        return []
+    ordered = [value[key] for key in sorted(value, key=lambda item: int(item))]
+    return _parse_level_list(ordered, side)
+
+
 def _extract_side_levels(payload, side, depth=0):
-    """Best-effort parser for common REST/Centrifugo order-book envelopes."""
-    if depth > 6:
+    """Parse common REST/Centrifugo envelopes, including numeric-keyed depth maps."""
+    if depth > 8:
         return []
     if isinstance(payload, dict):
         names = ("bids", "bid", "buy", "buyDepth") if side == "bid" else ("asks", "ask", "sell", "sellDepth")
         for name in names:
             parsed = _parse_level_list(payload.get(name), side)
+            if not parsed:
+                parsed = _parse_numeric_level_mapping(payload.get(name), side)
             if parsed:
                 return parsed
+
+        # Wallex Broadcaster depth payloads may be {"0": {...}, "1": {...}}.
+        parsed = _parse_numeric_level_mapping(payload, side)
+        if parsed:
+            return parsed
+
         for name in ("result", "data", "book", "orderbook", "depth", "symbols"):
             child = payload.get(name)
             if isinstance(child, (dict, list)):
@@ -192,7 +228,7 @@ def _extract_side_levels(payload, side, depth=0):
         parsed = _parse_level_list(payload, side)
         if parsed:
             return parsed
-        for child in payload[:20]:
+        for child in payload[:100]:
             parsed = _extract_side_levels(child, side, depth + 1)
             if parsed:
                 return parsed
