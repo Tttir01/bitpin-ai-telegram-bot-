@@ -1,7 +1,7 @@
 import unittest
 
 from wallex_centrifugo_diagnostic import (
-    CHANNELS, inspect_frame, _extract_side_levels, _find_wallex_symbol_book,
+    CHANNELS, inspect_frame, _extract_side_levels, _find_wallex_symbol_book,\n    _safe_payload_preview,
 )
 
 
@@ -64,6 +64,23 @@ class CentrifugoFrameTests(unittest.TestCase):
         self.assertEqual(frame["levels"], 2)
         self.assertEqual(frame["top_price"], 101.0)
         self.assertEqual(frame["payload_shape"], "numeric_keyed_map")
+
+    def test_publication_includes_sanitized_payload_preview(self):
+        frame = inspect_frame({
+            "push": {
+                "channel": CHANNELS[0],
+                "pub": {"data": {"unexpected": {"value": 7}, "api_key": "do-not-show"}},
+            }
+        })
+        self.assertEqual(frame["kind"], "publication")
+        self.assertIn('"unexpected"', frame["payload_preview"])
+        self.assertNotIn("do-not-show", frame["payload_preview"])
+        self.assertIn("[REDACTED]", frame["payload_preview"])
+
+    def test_payload_preview_is_bounded(self):
+        preview = _safe_payload_preview({"data": "x" * 5000}, max_chars=100)
+        self.assertLessEqual(len(preview), 114)
+        self.assertIn("[truncated]", preview)
 
     def test_ping_and_server_error(self):
         self.assertEqual(inspect_frame({})["kind"], "ping")
