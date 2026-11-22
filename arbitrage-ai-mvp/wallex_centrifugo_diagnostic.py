@@ -76,7 +76,7 @@ def run_diagnostic(wait_seconds=10):
                 raw = ws.recv()
             except websocket.WebSocketTimeoutException:
                 continue
-            for line in raw.split("\\n"):
+            for line in raw.splitlines():
                 if not line:
                     continue
                 try:
@@ -105,7 +105,7 @@ def run_diagnostic(wait_seconds=10):
                 raw = ws.recv()
             except websocket.WebSocketTimeoutException:
                 continue
-            for line in raw.split("\\n"):
+            for line in raw.splitlines():
                 if not line:
                     continue
                 try:
