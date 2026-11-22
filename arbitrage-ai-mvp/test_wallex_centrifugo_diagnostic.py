@@ -24,15 +24,46 @@ class CentrifugoFrameTests(unittest.TestCase):
         self.assertEqual(frame["channel"], CHANNELS[0])
         self.assertEqual(frame["levels"], 1)
         self.assertEqual(frame["timestamp_fields"], [])
+        self.assertEqual(frame["top_price"], 1.0)
+        self.assertEqual(frame["top_quantity"], 2.0)
 
-    def test_timestamp_fields_are_reported_not_trusted(self):
+    def test_timestamp_fields_are_reported_recursively_but_not_trusted(self):
         frame = inspect_frame({
             "push": {
                 "channel": CHANNELS[1],
-                "pub": {"data": {"timestamp": 123, "bids": []}},
+                "pub": {"data": {"metadata": {"timestamp": 123}, "0": {"price": "2", "quantity": "3"}}},
             }
         })
         self.assertEqual(frame["timestamp_fields"], ["timestamp"])
+
+    def test_numeric_keyed_wallex_payload_is_parsed_and_sorted(self):
+        payload = {
+            "1": {"price": "101", "quantity": "2"},
+            "0": {"price": "100", "quantity": "1"},
+        }
+        self.assertEqual(_extract_side_levels(payload, "ask"), [(100.0, 1.0), (101.0, 2.0)])
+        self.assertEqual(_extract_side_levels(payload, "bid"), [(101.0, 2.0), (100.0, 1.0)])
+
+    def test_numeric_keyed_payload_inside_data_envelope(self):
+        payload = {"data": {
+            "1": {"price": "101", "quantity": "2"},
+            "0": {"price": "100", "quantity": "1"},
+        }}
+        self.assertEqual(_extract_side_levels(payload, "ask")[0], (100.0, 1.0))
+
+    def test_publication_reports_extracted_level_count_for_numeric_map(self):
+        frame = inspect_frame({
+            "push": {
+                "channel": CHANNELS[0],
+                "pub": {"data": {
+                    "1": {"price": "101", "quantity": "2"},
+                    "0": {"price": "100", "quantity": "1"},
+                }},
+            }
+        })
+        self.assertEqual(frame["levels"], 2)
+        self.assertEqual(frame["top_price"], 101.0)
+        self.assertEqual(frame["payload_shape"], "numeric_keyed_map")
 
     def test_ping_and_server_error(self):
         self.assertEqual(inspect_frame({})["kind"], "ping")
