@@ -80,7 +80,7 @@ with st.expander("🧪 آزمایش اتصال زندهٔ والکس از سرو
                 st.write(f"Handshake Engine.IO {eio_version}: {type(error).__name__}: {str(error)[:160]}")
 
         received_channels = set()
-        client = socketio.Client(reconnection=False, logger=False, engineio_logger=False)
+        client = socketio.Client(reconnection=False, logger=True, engineio_logger=True)
 
         @client.on("Broadcaster")
         def _wallex_broadcaster(channel, data):
