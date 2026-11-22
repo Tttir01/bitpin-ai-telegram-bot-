@@ -95,6 +95,10 @@ def inspect_frame(message):
                 "levels": len(levels),
                 "top_price": levels[0][0] if levels else None,
                 "top_quantity": levels[0][1] if levels else None,
+                "top_levels": [
+                    {"price": price, "quantity": quantity}
+                    for price, quantity in levels[:5]
+                ],
                 "timestamp_fields": sorted(_timestamp_field_names(data)),
                 "payload_shape": (
                     "numeric_keyed_map"
