@@ -98,41 +98,70 @@ with st.expander("🧪 آزمایش اتصال زندهٔ والکس از سرو
             "این داده‌ها به سیگنال واجد شرایط تبدیل نمی‌شوند."
         )
 
-# Separate, read-only diagnostic for the documented Centrifugo transport.
-with st.expander("🧪 آزمایش جریان Centrifugo والکس (فقط‌خواندنی)", expanded=False):
+# Independent REST/Centrifugo parity check. Results never feed the scanner.
+with st.expander("🧪 تطبیق دفتر سفارش REST و Centrifugo والکس (فقط‌خواندنی)", expanded=False):
     st.caption(
-        "این تست مستقل از اسکنر است و snapshotها را وارد محاسبه سود یا شمارنده پایداری نمی‌کند. "
-        "دریافت پیام به معنی همگام‌سازی REST/WebSocket یا مجوز معامله نیست."
+        "ابتدا دو کانال عمومی خرید و فروش مشترک می‌شوند، سپس snapshot عمومی REST دریافت "
+        "و پیام‌های بعدی WebSocket با بهترین سطح آن مقایسه می‌شوند. این آزمایش مستقل از اسکنر است."
     )
-    if st.button("آزمایش Centrifugo والکس", key="wallex_centrifugo_diagnostic"):
+    if st.button("آزمایش تطبیق REST و WebSocket", key="wallex_rest_ws_parity"):
         try:
-            from wallex_centrifugo_diagnostic import run_diagnostic
-            with st.spinner("در حال اتصال به جریان عمومی والکس..."):
-                diagnostic = run_diagnostic(wait_seconds=10)
-            if diagnostic.get("connected"):
+            from wallex_centrifugo_diagnostic import run_parity_diagnostic
+            with st.spinner("در حال مقایسه REST با پیام‌های تازه Centrifugo..."):
+                parity = run_parity_diagnostic(wait_seconds=10)
+            if parity.get("connected"):
                 st.success("Handshake اتصال Centrifugo موفق بود.")
             else:
-                st.error(f"Handshake ناموفق بود: {diagnostic.get('error', 'پاسخ دریافت نشد')}")
-            st.write(f"تأیید اشتراک: {diagnostic.get('subscribe_acks', 0)} از ۲")
-            st.write(f"تعداد پیام‌های عمق دریافت‌شده: {diagnostic.get('publications', 0)}")
-            st.write(
-                "کانال‌های دریافت‌شده: "
-                + (", ".join(diagnostic.get("received_channels", [])) or "هیچ‌کدام")
-            )
-            if diagnostic.get("both_depth_sides_received"):
-                st.success("از هر دو سمت خرید و فروش پیام دریافت شد.")
-            elif diagnostic.get("connected"):
-                st.warning("اتصال برقرار شد، اما دریافت هر دو سمت عمق تأیید نشد.")
-            if diagnostic.get("timestamp_fields"):
-                st.write("نام فیلدهای زمانی مشاهده‌شده: " + ", ".join(diagnostic["timestamp_fields"]))
+                st.error(f"Handshake ناموفق: {parity.get('error', 'پاسخی دریافت نشد')}")
+            st.write(f"تأیید اشتراک کانال‌ها: {parity.get('subscribe_acks', 0)} از ۲")
+            st.write(f"تعداد پیام‌های پس از دریافت REST: {parity.get('publication_count', 0)}")
+            if parity.get("rest_latency_ms") is not None:
+                st.write(f"زمان پاسخ REST: {parity['rest_latency_ms']} میلی‌ثانیه")
+
+            labels = {"bid": "بهترین قیمت خرید (Bid)", "ask": "بهترین قیمت فروش (Ask)"}
+            for side in ("bid", "ask"):
+                st.markdown(f"**{labels[side]}**")
+                rest_top = parity.get("rest", {}).get(side)
+                ws_top = parity.get("websocket", {}).get(side)
+                comparison = parity.get("comparisons", {}).get(side, {})
+                if rest_top:
+                    st.write(
+                        f"REST: قیمت {rest_top['price']:,.8g} | حجم {rest_top['quantity']:,.8g}"
+                    )
+                else:
+                    st.write("REST: سطح قابل‌استخراج پیدا نشد.")
+                if ws_top:
+                    st.write(
+                        f"WebSocket: قیمت {ws_top['price']:,.8g} | حجم {ws_top['quantity']:,.8g}"
+                    )
+                else:
+                    st.write("WebSocket: سطح قابل‌استخراج در پیام‌ها پیدا نشد.")
+                if comparison.get("status") == "price_within_tolerance":
+                    st.success(
+                        f"اختلاف قیمت {comparison['price_diff_pct']:.5f}% "
+                        f"(حد مجاز {comparison['tolerance_pct']:.2f}%)؛ "
+                        f"اختلاف حجم {comparison['quantity_diff_pct']:.2f}%"
+                    )
+                elif comparison.get("status") == "price_mismatch":
+                    st.warning(
+                        f"اختلاف قیمت {comparison['price_diff_pct']:.5f}% "
+                        f"بیشتر از حد {comparison['tolerance_pct']:.2f}% است؛ "
+                        f"اختلاف حجم {comparison['quantity_diff_pct']:.2f}%"
+                    )
+                else:
+                    st.info("برای این سمت مقایسه عددی ممکن نشد؛ قالب پیام ممکن است متفاوت یا delta باشد.")
+
+            if parity.get("both_sides_compared"):
+                st.info("هر دو سمت از نظر قیمت قابل مقایسه بودند؛ این نتیجه فقط یک نمونه زمانی است.")
             else:
-                st.info("در پیام‌های مشاهده‌شده فیلد timestamp/sequence شناخته‌شده‌ای دیده نشد.")
-            st.warning(diagnostic.get(
+                st.warning("مقایسه کامل هر دو سمت انجام نشد.")
+            st.warning(parity.get(
                 "warning",
-                "این آزمایش فقط اتصال را بررسی می‌کند و مجوز سیگنال یا معامله نیست."
+                "تطبیق یک نمونه، همگام‌سازی کامل دفتر سفارش یا مجوز معامله را ثابت نمی‌کند."
             ))
+            st.caption("execution_allowed = False؛ هیچ داده‌ای به اسکنر یا شمارنده پایداری منتقل نمی‌شود.")
         except Exception as error:
-            st.error(f"آزمایش Centrifugo ناموفق بود: {type(error).__name__}: {str(error)[:180]}")
+            st.error(f"آزمایش تطبیق ناموفق بود: {type(error).__name__}: {str(error)[:180]}")
 
 st.caption("نسخه آزمایشی ۰.۹ | گزارش عملکرد معاملات کاغذی و تشخیص فرصت پایدار")
 st.warning(
