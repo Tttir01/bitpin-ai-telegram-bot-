@@ -99,6 +99,7 @@ def inspect_frame(message):
                 "payload_shape": (
                     "numeric_keyed_map"
                     if isinstance(data, dict) and data and all(str(key).isdigit() for key in data)
+                    else "message_envelope" if isinstance(data, dict) and isinstance(data.get("message"), list)
                     else "list" if isinstance(data, list) else "object"
                 ),
             }
@@ -245,7 +246,7 @@ def _extract_side_levels(payload, side, depth=0):
         if parsed:
             return parsed
 
-        for name in ("result", "data", "book", "orderbook", "depth", "symbols"):
+        for name in ("result", "data", "message", "book", "orderbook", "depth", "symbols"):
             child = payload.get(name)
             if isinstance(child, (dict, list)):
                 parsed = _extract_side_levels(child, side, depth + 1)
