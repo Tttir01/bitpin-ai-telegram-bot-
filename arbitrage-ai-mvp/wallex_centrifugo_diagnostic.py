@@ -297,6 +297,7 @@ def run_parity_diagnostic(wait_seconds=10, price_tolerance_pct=0.10):
     result = {
         "connected": False, "subscribe_acks": 0, "publication_count": 0,
         "received_channels": [], "rest": {}, "websocket": {},
+        "payload_samples": {"bid": [], "ask": []},
         "comparisons": {}, "execution_allowed": False,
     }
     try:
