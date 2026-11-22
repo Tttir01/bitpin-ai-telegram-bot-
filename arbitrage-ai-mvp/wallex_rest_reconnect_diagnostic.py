@@ -96,11 +96,13 @@ def _connect_and_subscribe(websocket):
     return ws
 
 
-def _collect_first_depth(ws, wait_seconds):
-    events = {"bid": [], "ask": []}
+def _collect_depth_publications(ws, wait_seconds, max_samples=5):
+    """Observe the full window, counting publications and retaining bounded safe samples."""
+    samples = {"bid": [], "ask": []}
+    counts = {"bid": 0, "ask": 0}
     started = time.monotonic()
     deadline = started + wait_seconds
-    while time.monotonic() < deadline and not all(events.values()):
+    while time.monotonic() < deadline:
         try:
             raw = ws.recv()
         except Exception as exc:
@@ -116,17 +118,29 @@ def _collect_first_depth(ws, wait_seconds):
                 ws.send("{}")
             elif frame["kind"] == "error":
                 raise RuntimeError(frame["error"])
-            elif frame["kind"] == "publication" and frame.get("side") in events:
+            elif frame["kind"] == "publication" and frame.get("side") in samples:
                 side = frame["side"]
+                counts[side] += 1
                 if frame.get("levels", 0) > 0 and frame.get("top_price") and frame.get("top_quantity"):
-                    events[side].append({
-                        "received_after_reconnect_ms": round((time.monotonic() - started) * 1000),
-                        "levels": int(frame["levels"]),
-                        "price": frame["top_price"],
-                        "quantity": frame["top_quantity"],
-                        "metadata_fields": frame.get("timestamp_fields", []),
-                    })
-    return events
+                    if len(samples[side]) < max_samples:
+                        samples[side].append({
+                            "received_after_reconnect_ms": round((time.monotonic() - started) * 1000),
+                            "levels": int(frame["levels"]),
+                            "price": frame["top_price"],
+                            "quantity": frame["top_quantity"],
+                            "top_levels": frame.get("top_levels", []),
+                            "payload_shape": frame.get("payload_shape", "unknown"),
+                            "payload_preview": frame.get("payload_preview", ""),
+                            "metadata_fields": frame.get("timestamp_fields", []),
+                        })
+    return {"samples": samples, "publication_counts": counts}
+
+
+def _first_sample_per_side(collection):
+    return {
+        side: (collection["samples"][side][0] if collection["samples"][side] else None)
+        for side in ("bid", "ask")
+    }
 
 
 def run_rest_reconnect_convergence(gap_seconds=4, wait_seconds=10):
@@ -154,7 +168,8 @@ def run_rest_reconnect_convergence(gap_seconds=4, wait_seconds=10):
         if not _valid_snapshot(result["pre_disconnect_rest"]):
             raise RuntimeError("Pre-disconnect REST snapshot is incomplete")
         first = _connect_and_subscribe(websocket)
-        before = _collect_first_depth(first, 3)
+        before_collection = _collect_depth_publications(first, 3)
+        before = _first_sample_per_side(before_collection)
         if not all(before[side] for side in ("bid", "ask")):
             raise RuntimeError("No valid depth publication on both sides before disconnect")
         first.close()
@@ -166,9 +181,15 @@ def run_rest_reconnect_convergence(gap_seconds=4, wait_seconds=10):
             raise RuntimeError("Post-gap REST snapshot is incomplete")
         second = _connect_and_subscribe(websocket)
         result["reconnect_delay_ms"] = round((time.monotonic() - disconnected_at) * 1000)
-        events = _collect_first_depth(second, int(wait_seconds))
-        result["after_reconnect_ws"] = {
-            side: (events[side][0] if events[side] else None) for side in ("bid", "ask")
+        collection = _collect_depth_publications(second, int(wait_seconds))
+        events = collection["samples"]
+        result["after_reconnect_ws"] = _first_sample_per_side(collection)
+        result["ws_publication_diagnostics"] = {
+            "observation_window_seconds": int(wait_seconds),
+            "publication_counts": collection["publication_counts"],
+            "retained_sample_limit_per_side": 5,
+            "samples": events,
+            "note": "نمونه‌ها فقط publicationهای دریافتی و زمان دریافت محلی‌اند؛ به‌تنهایی snapshot یا delta بودن و ترتیب کامل را اثبات نمی‌کنند."
         }
         rest_sides = result["post_disconnect_rest"]["sides"]
         result["post_rest_ws_comparison"] = {
