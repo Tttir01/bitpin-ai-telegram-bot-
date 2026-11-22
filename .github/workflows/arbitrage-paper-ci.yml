@@ -32,7 +32,7 @@ jobs:
         run: python -m unittest -v test_mvp.py test_wallex_stream.py test_monitor.py test_potential_scanner.py
       - name: Run paper monitor and risk-gate tests
         working-directory: arbitrage-ai-mvp
-        run: python -m unittest -v test_risk_gates.py test_monitor.py test_monitor_entrypoint.py test_account_readonly.py test_scanner.py test_wallex_centrifugo_diagnostic.py
+        run: python -m unittest -v test_risk_gates.py test_monitor.py test_monitor_entrypoint.py test_account_readonly.py test_scanner.py test_wallex_centrifugo_diagnostic.py test_wallex_depth_validator.py
 
   wallex-live-diagnostic:
     name: Wallex live Centrifugo and REST metadata diagnostic (non-blocking)
