@@ -157,6 +157,25 @@ with st.expander("🧪 تطبیق دفتر سفارش REST و Centrifugo وال�
             if parity.get("rest_latency_ms") is not None:
                 st.write(f"زمان پاسخ REST: {parity['rest_latency_ms']} میلی‌ثانیه")
 
+            # Sanitized public payload previews help identify the actual Centrifugo schema.
+            samples = parity.get("payload_samples", {})
+            with st.expander("🔬 نمونه ساختار خام پیام‌های عمومی (پاک‌سازی‌شده)", expanded=True):
+                st.caption(
+                    "حداکثر دو نمونه برای هر سمت نمایش داده می‌شود. فیلدهای شبیه کلید/توکن حذف "
+                    "و متن طولانی محدود می‌شود؛ این داده‌ها فقط برای تشخیص قالب پیام هستند."
+                )
+                for sample_side, sample_title in (("bid", "کانال خرید"), ("ask", "کانال فروش")):
+                    st.markdown(f"**{sample_title}**")
+                    side_samples = samples.get(sample_side, [])
+                    if not side_samples:
+                        st.info("نمونه پیام قابل ثبت برای این کانال دریافت نشد.")
+                    for sample_index, sample in enumerate(side_samples, start=1):
+                        st.caption(
+                            f"نمونه {sample_index} | نوع ساختار: {sample.get('payload_shape', 'نامشخص')} "
+                            f"| سطوح استخراج‌شده: {sample.get('levels_extracted', 0)}"
+                        )
+                        st.code(sample.get("preview", ""), language="json")
+
             labels = {"bid": "بهترین قیمت خرید (Bid)", "ask": "بهترین قیمت فروش (Ask)"}
             for side in ("bid", "ask"):
                 st.markdown(f"**{labels[side]}**")
