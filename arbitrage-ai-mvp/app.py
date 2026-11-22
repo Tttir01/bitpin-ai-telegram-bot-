@@ -180,6 +180,40 @@ with st.expander("🔎 اعتبارسنج مستقل چندنمونه‌ای ع�
             st.error(f"اجرای اعتبارسنج با خطا متوقف شد: {type(error).__name__}: {str(error)[:220]}")
 
 # Deliberate reconnect probe. It is isolated from scanner and paper pipeline.
+# REST pre/post disconnect convergence probe; isolated from trading paths.
+with st.expander("🧭 آزمون همگرایی REST پس از قطعی والکس (فقط‌خواندنی)", expanded=False):
+    st.caption(
+        "این آزمون REST را پیش و پس از وقفه با اولین پیام‌های WS بعد از اتصال مجدد مقایسه می‌کند. "
+        "تطبیق تقریبی، بازیابی پیام‌های ازدست‌رفته را ثابت نمی‌کند."
+    )
+    if st.button("اجرای آزمون REST قبل/بعد از قطعی", key="wallex_rest_reconnect_convergence"):
+        from wallex_rest_reconnect_diagnostic import run_rest_reconnect_convergence
+        with st.spinner("در حال اجرای آزمون مستقل و فقط‌خواندنی..."):
+            convergence = run_rest_reconnect_convergence()
+        if convergence.get("status") == "candidate":
+            st.success("همگرایی تقریبی مشاهده شد؛ نتیجه صرفاً تشخیصی است.")
+        else:
+            st.error("همگرایی تأیید نشد یا داده کافی دریافت نشد.")
+        for key, title in (
+            ("pre_disconnect_rest", "REST پیش از قطع"),
+            ("post_disconnect_rest", "REST پس از وقفه"),
+            ("after_reconnect_ws", "اولین پیام‌های WS پس از اتصال مجدد"),
+            ("post_rest_ws_comparison", "مقایسه با REST جدید"),
+        ):
+            st.markdown(f"**{title}**")
+            st.json(convergence.get(key) or {})
+        st.caption(
+            f"وقفه عمدی: {convergence.get('gap_seconds', '—')} ثانیه | "
+            f"تأخیر اتصال مجدد: {convergence.get('reconnect_delay_ms', '—')} میلی‌ثانیه"
+        )
+        st.info(convergence.get("interpretation", "نتیجه صرفاً تشخیصی است."))
+        st.json({
+            "gap_recovery_verified": convergence.get("gap_recovery_verified", False),
+            "sequence_order_verified": convergence.get("sequence_order_verified", False),
+            "scanner_feed_enabled": convergence.get("scanner_feed_enabled", False),
+            "execution_allowed": convergence.get("execution_allowed", False),
+        })
+
 with st.expander("🔌 آزمون قطع و اتصال مجدد جریان والکس (فقط‌خواندنی)", expanded=False):
     st.caption(
         "اتصال اولیه عمداً بسته می‌شود؛ سپس اتصال و اشتراک هر دو کانال دوباره برقرار می‌شود. "
