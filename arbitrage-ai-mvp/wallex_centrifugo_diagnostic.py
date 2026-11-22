@@ -37,6 +37,36 @@ def _timestamp_field_names(payload, depth=0):
     return found
 
 
+_SENSITIVE_KEYS = ("token", "secret", "password", "authorization", "cookie", "api_key", "apikey")
+
+
+def _safe_payload_preview(payload, max_chars=1400):
+    """Compact JSON preview for public market-data diagnostics; redact credential-like fields."""
+    def clean(value, depth=0):
+        if depth > 6:
+            return "[max-depth]"
+        if isinstance(value, dict):
+            output = {}
+            for key, child in list(value.items())[:40]:
+                key_text = str(key)
+                if any(term in key_text.lower() for term in _SENSITIVE_KEYS):
+                    output[key_text] = "[REDACTED]"
+                else:
+                    output[key_text] = clean(child, depth + 1)
+            return output
+        if isinstance(value, list):
+            return [clean(item, depth + 1) for item in value[:30]]
+        if isinstance(value, str):
+            return value[:300]
+        if value is None or isinstance(value, (int, float, bool)):
+            return value
+        return str(value)[:120]
+    try:
+        rendered = json.dumps(clean(payload), ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError):
+        rendered = repr(payload)
+    return rendered[:max_chars] + ("…[truncated]" if len(rendered) > max_chars else "")
+
 def inspect_frame(message):
     """Return a compact classification for one decoded Centrifugo frame."""
     if not isinstance(message, dict):
@@ -54,13 +84,14 @@ def inspect_frame(message):
         channel = push.get("channel")
         publication = push.get("pub")
         data = publication.get("data") if isinstance(publication, dict) else None
-        if channel in CHANNELS and isinstance(data, (dict, list)):
+        if channel in CHANNELS:
             side = "bid" if channel.endswith("@buyDepth") else "ask"
             levels = _extract_side_levels(data, side)
             return {
                 "kind": "publication",
                 "channel": channel,
                 "side": side,
+                "payload_preview": _safe_payload_preview(data),
                 "levels": len(levels),
                 "top_price": levels[0][0] if levels else None,
                 "top_quantity": levels[0][1] if levels else None,
@@ -360,6 +391,12 @@ def run_parity_diagnostic(wait_seconds=10, price_tolerance_pct=0.10):
                     result["publication_count"] += 1
                     received.add(frame["channel"])
                     side = frame.get("side")
+                    if side in ("bid", "ask") and len(result["payload_samples"][side]) < 2:
+                        result["payload_samples"][side].append({
+                            "levels_extracted": frame.get("levels", 0),
+                            "payload_shape": frame.get("payload_shape", "unknown"),
+                            "preview": frame.get("payload_preview", ""),
+                        })
                     if side in ("bid", "ask") and frame.get("top_price") and frame.get("top_quantity"):
                         result["websocket"][side] = {
                             "price": frame["top_price"], "quantity": frame["top_quantity"]
