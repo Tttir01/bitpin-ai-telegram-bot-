@@ -102,6 +102,10 @@ def run_depth_validation(wait_seconds=20, min_messages=10):
         "execution_allowed": False, "scanner_feed_enabled": False,
         "rest_before": None, "rest_after": None, "sides": {},
         "sequence_recovery_verified": False, "snapshot_semantics_verified": False,
+        "transport": {"raw_frames": 0, "json_frames": 0, "ping_frames": 0,
+                      "ignored_frames": 0, "unknown_push_channels": [],
+                      "publication_frames": 0, "zero_level_publications": 0,
+                      "frame_previews": []},
     }
     ws = None
     try:
@@ -162,15 +166,27 @@ def run_depth_validation(wait_seconds=20, min_messages=10):
             except websocket.WebSocketTimeoutException:
                 continue
             for line in raw.splitlines():
+                if not line:
+                    continue
+                result["transport"]["raw_frames"] += 1
                 try:
-                    frame = inspect_frame(json.loads(line))
+                    decoded = json.loads(line)
+                    result["transport"]["json_frames"] += 1
+                    frame = inspect_frame(decoded)
                 except (ValueError, TypeError):
+                    result["transport"]["frame_previews"].append(
+                        {"kind": "invalid_json", "preview": str(line)[:240]}
+                    )
                     continue
                 if frame["kind"] == "ping":
+                    result["transport"]["ping_frames"] += 1
                     ws.send("{}")
                 elif frame["kind"] == "error":
                     raise RuntimeError(frame["error"])
                 elif frame["kind"] == "publication" and frame.get("side") in events:
+                    result["transport"]["publication_frames"] += 1
+                    if not frame.get("levels"):
+                        result["transport"]["zero_level_publications"] += 1
                     events[frame["side"]].append({
                         "side": frame["side"],
                         "received_after_start_ms": round((time.monotonic() - started) * 1000),
@@ -179,11 +195,25 @@ def run_depth_validation(wait_seconds=20, min_messages=10):
                         "quantity": frame.get("top_quantity"),
                         "metadata_fields": frame.get("timestamp_fields", []),
                     })
+                else:
+                    result["transport"]["ignored_frames"] += 1
+                    push = decoded.get("push") if isinstance(decoded, dict) else None
+                    if isinstance(push, dict):
+                        channel = push.get("channel")
+                        if channel and channel not in result["transport"]["unknown_push_channels"]:
+                            result["transport"]["unknown_push_channels"].append(str(channel)[:160])
+                    if len(result["transport"]["frame_previews"]) < 6:
+                        from wallex_centrifugo_diagnostic import _safe_payload_preview
+                        result["transport"]["frame_previews"].append({
+                            "kind": frame.get("kind", "unknown"),
+                            "preview": _safe_payload_preview(decoded, max_chars=500),
+                        })
         result["rest_after"] = _rest_snapshot()
         result["sides"] = {
             side: _side_summary(events[side], result["rest_before"], result["rest_after"], int(min_messages))
             for side in ("bid", "ask")
         }
+        result["transport"]["event_counts"] = {side: len(items) for side, items in events.items()}
         result["received_channels"] = [
             CHANNELS[0] if events["bid"] else None,
             CHANNELS[1] if events["ask"] else None,
