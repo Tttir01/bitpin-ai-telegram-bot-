@@ -88,12 +88,30 @@ with st.expander("🧪 آزمایش اتصال زندهٔ والکس از سرو
                 st.write(f"Handshake Engine.IO {eio_version}: {type(error).__name__}: {str(error)[:160]}")
 
         received_channels = set()
+        broadcaster_events = []
+        callback_errors = []
         client = socketio.Client(reconnection=False, logger=True, engineio_logger=True)
 
+        # Wallex documents Broadcaster(channel, data). Accept *args so a
+        # protocol/signature mismatch is recorded instead of silently lost.
         @client.on("Broadcaster")
-        def _wallex_broadcaster(channel, data):
-            if channel in ("USDTTMN@buyDepth", "USDTTMN@sellDepth") and isinstance(data, (dict, list)) and data:
-                received_channels.add(channel)
+        def _wallex_broadcaster(*args):
+            try:
+                channel = args[0] if args else None
+                data = args[1] if len(args) > 1 else None
+                channel_text = str(channel)[:120]
+                received_channels.add(channel_text)
+                sample = {
+                    "channel": channel_text,
+                    "argument_count": len(args),
+                    "data_type": type(data).__name__,
+                    "data_keys": list(data.keys())[:20] if isinstance(data, dict) else None,
+                    "data_length": len(data) if isinstance(data, (dict, list, str)) else None,
+                }
+                if len(broadcaster_events) < 6:
+                    broadcaster_events.append(sample)
+            except Exception as callback_error:
+                callback_errors.append(f"{type(callback_error).__name__}: {str(callback_error)[:140]}")
 
         engineio_logger = logging.getLogger("engineio.client")
         socketio_logger = logging.getLogger("socketio.client")
@@ -105,6 +123,7 @@ with st.expander("🧪 آزمایش اتصال زندهٔ والکس از سرو
         socketio_logger.addHandler(log_handler)
         engineio_logger.setLevel(logging.DEBUG)
         socketio_logger.setLevel(logging.DEBUG)
+        connect_error = None
         try:
             client.connect(
                 "https://api.wallex.ir",
@@ -114,23 +133,22 @@ with st.expander("🧪 آزمایش اتصال زندهٔ والکس از سرو
             st.success("اتصال Socket.IO برقرار شد.")
             client.emit("subscribe", {"channel": "USDTTMN@buyDepth"})
             client.emit("subscribe", {"channel": "USDTTMN@sellDepth"})
-            deadline = time.monotonic() + 7
-            while time.monotonic() < deadline and len(received_channels) < 2:
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline and len(
+                {"USDTTMN@buyDepth", "USDTTMN@sellDepth"} & received_channels
+            ) < 2:
                 time.sleep(0.1)
-            if len(received_channels) == 2:
-                st.success("پیام عمق خرید و فروش USDTTMN از جریان زنده دریافت شد.")
+            matched_channels = {"USDTTMN@buyDepth", "USDTTMN@sellDepth"} & received_channels
+            if len(matched_channels) == 2:
+                st.success("رویداد Broadcaster هر دو کانال عمق دریافت شد.")
             else:
                 st.warning(
-                    "اتصال برقرار شد، اما هر دو کانال عمق در مهلت آزمایش پیام ندادند. "
-                    f"کانال‌های دریافت‌شده: {', '.join(sorted(received_channels)) or 'هیچ‌کدام'}."
+                    "اتصال برقرار شد، اما پیام هر دو کانال در پنجره ۲۰ ثانیه‌ای دریافت نشد. "
+                    f"کانال‌های مشاهده‌شده: {', '.join(sorted(received_channels)) or 'هیچ‌کدام'}."
                 )
         except Exception as error:
-            st.error(
-                f"اتصال Socket.IO ناموفق بود: {type(error).__name__}: {str(error)[:220]}"
-            )
-            diagnostic_log = log_stream.getvalue().strip()
-            if diagnostic_log:
-                st.code("\\n".join(diagnostic_log.splitlines()[-12:]), language="text")
+            connect_error = f"{type(error).__name__}: {str(error)[:220]}"
+            st.error(f"اتصال/اشتراک Socket.IO ناموفق بود: {connect_error}")
         finally:
             engineio_logger.removeHandler(log_handler)
             socketio_logger.removeHandler(log_handler)
@@ -138,6 +156,23 @@ with st.expander("🧪 آزمایش اتصال زندهٔ والکس از سرو
             socketio_logger.setLevel(previous_socketio_level)
             if client.connected:
                 client.disconnect()
+
+        st.write(f"تعداد رویدادهای Broadcaster: {len(broadcaster_events)} (حداکثر ۶ نمونه ثبت می‌شود)")
+        st.write(f"کانال‌های مشاهده‌شده: {', '.join(sorted(received_channels)) or 'هیچ‌کدام'}")
+        if broadcaster_events:
+            st.json(broadcaster_events)
+        if callback_errors:
+            st.warning("خطاهای callback:")
+            st.code("\n".join(callback_errors[-5:]), language="text")
+        diagnostic_log = log_stream.getvalue().strip()
+        if diagnostic_log:
+            st.caption("گزارش فنی Socket.IO (آخرین خطوط)")
+            st.code("\n".join(diagnostic_log.splitlines()[-24:]), language="text")
+        if connect_error is None and not broadcaster_events:
+            st.info(
+                "Handshake/اتصال برقرار شده ولی هیچ رویداد Broadcaster به callback نرسیده است؛ "
+                "این وضعیت با دریافت دفتر سفارش تفاوت دارد."
+            )
 
         st.info(
             "تفسیر: نتیجهٔ این آزمایش فقط دسترسی شبکه و دریافت پیام را مشخص می‌کند. "
