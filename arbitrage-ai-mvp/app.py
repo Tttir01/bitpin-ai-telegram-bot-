@@ -164,6 +164,8 @@ with st.expander("🔎 اعتبارسنج مستقل چندنمونه‌ای ع�
             if validation.get("error"):
                 st.warning(validation["error"])
             st.write(f"اشتراک کانال‌ها: {validation.get('subscribe_acks', 0)} از ۲")
+            st.markdown("**تشخیص لایه انتقال WebSocket (برای یافتن علت صفر بودن پیام‌ها)**")
+            st.json(validation.get("transport", {}))
             for side, title in (("bid", "خرید"), ("ask", "فروش")):
                 item = validation.get("sides", {}).get(side, {})
                 st.markdown(f"**کانال {title}**")
