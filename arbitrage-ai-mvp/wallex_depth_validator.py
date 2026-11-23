@@ -102,7 +102,9 @@ def run_depth_validation(wait_seconds=20, min_messages=10):
         "execution_allowed": False, "scanner_feed_enabled": False,
         "rest_before": None, "rest_after": None, "sides": {},
         "sequence_recovery_verified": False, "snapshot_semantics_verified": False,
-        "transport": {"raw_frames": 0, "json_frames": 0, "ping_frames": 0,
+        "transport": {"recv_calls": 0, "timeout_returns": 0, "empty_recv_returns": 0,
+                      "nonempty_recv_returns": 0, "total_received_chars": 0,
+                      "raw_frames": 0, "json_frames": 0, "ping_frames": 0,
                       "ignored_frames": 0, "unknown_push_channels": [],
                       "publication_frames": 0, "zero_level_publications": 0,
                       "frame_previews": []},
@@ -161,14 +163,21 @@ def run_depth_validation(wait_seconds=20, min_messages=10):
         events = {"bid": [], "ask": []}
         deadline = started + int(wait_seconds)
         while time.monotonic() < deadline:
+            result["transport"]["recv_calls"] += 1
             try:
                 raw = ws.recv()
             except websocket.WebSocketTimeoutException:
+                result["transport"]["timeout_returns"] += 1
                 continue
+            if not raw:
+                result["transport"]["empty_recv_returns"] += 1
+                continue
+            result["transport"]["nonempty_recv_returns"] += 1
+            result["transport"]["total_received_chars"] += len(raw)
             for line in raw.splitlines():
+                result["transport"]["raw_frames"] += 1
                 if not line:
                     continue
-                result["transport"]["raw_frames"] += 1
                 try:
                     decoded = json.loads(line)
                     result["transport"]["json_frames"] += 1
@@ -214,6 +223,7 @@ def run_depth_validation(wait_seconds=20, min_messages=10):
             for side in ("bid", "ask")
         }
         result["transport"]["event_counts"] = {side: len(items) for side, items in events.items()}
+        result["transport"]["socket_connected_after_observation"] = bool(getattr(ws, "connected", False))
         result["received_channels"] = [
             CHANNELS[0] if events["bid"] else None,
             CHANNELS[1] if events["ask"] else None,
