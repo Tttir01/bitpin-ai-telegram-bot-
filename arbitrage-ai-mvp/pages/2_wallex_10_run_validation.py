@@ -36,6 +36,33 @@ except Exception as exc:
     st.stop()
 
 st.subheader("بازیابی سوابق از فایل JSON")
+st.markdown("اگر بارگذاری فایل در گوشی خطای شبکه داد، متن کامل فایل JSON را در کادر زیر بچسبانید.")
+pasted_report = st.text_area(
+    "متن کامل گزارش JSON",
+    height=180,
+    key="wallex_history_restore_paste",
+    placeholder='{"summary": {}, "runs": [...]}',
+)
+if st.button(
+    "بازیابی از متن چسبانده‌شده",
+    disabled=not pasted_report.strip(),
+    key="restore_wallex_history_paste",
+):
+    try:
+        restore_result = import_runs_json(pasted_report)
+        st.success(
+            f"بازیابی انجام شد: {restore_result['imported']} رکورد اضافه شد؛ "
+            f"{restore_result['skipped']} رکورد تکراری بود؛ "
+            f"{restore_result['conflicts']} مورد تعارض داشت و تغییر داده نشد."
+        )
+        if restore_result["conflicts"]:
+            st.warning("برای شماره‌های متعارض، سابقه موجود حفظ شد. فایل گزارش را نگه دارید تا مورد بررسی شود.")
+        st.rerun()
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        st.error(f"متن JSON وارد نشد: {exc}")
+    except Exception as exc:
+        st.error(f"خطا هنگام بازیابی متن: {exc}")
+
 uploaded_report = st.file_uploader(
     "فایل wallex_reconnect_10_run_report.json را انتخاب کنید",
     type=["json"],
