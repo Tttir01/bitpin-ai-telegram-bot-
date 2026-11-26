@@ -1,0 +1,40 @@
+name: Bitpin Fix Regression Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "arbitrage-ai-mvp/scanner.py"
+      - "arbitrage-ai-mvp/tests/**"
+      - "arbitrage-ai-mvp/requirements.txt"
+      - ".github/workflows/bitpin-fix-validation.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bitpin-fix-validation
+  cancel-in-progress: true
+
+jobs:
+  regression-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install free dependencies
+        run: python -m pip install -r arbitrage-ai-mvp/requirements.txt
+      - name: Compile scanner and tests
+        run: python -m compileall -q arbitrage-ai-mvp/scanner.py arbitrage-ai-mvp/tests
+      - name: Run regression tests
+        working-directory: arbitrage-ai-mvp
+        env:
+          PYTHONPATH: .
+          ALLOW_WALLEX_LOCAL_RECEIVE_TIME: "false"
+        run: python -m unittest discover -s tests -v
